@@ -1203,3 +1203,302 @@ button:disabled {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
+
+.report-modal .score-pill,
+.report-modal .total-grid .score-pill {
+  width: 100%;
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.judge-verdict,
+.review-note,
+.practice-list,
+.round-report-list {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  margin-top: 0;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.judge-verdict {
+  margin: 0;
+  color: rgba(245, 239, 230, 0.9);
+  font-family: var(--display);
+  font-size: 1.12rem;
+  line-height: 1.45;
+}
+
+.report-panel > .review-note:first-child,
+.report-panel > .judge-verdict {
+  margin-top: 0;
+}
+
+.round-report {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(280px, 1.1fr);
+  gap: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  padding: 14px 0;
+}
+
+.judge-verdict {
+  color: rgba(245, 239, 230, 0.82);
+}
+
+.context-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.context-strip span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.review-grid {
+  grid-template-columns: 1fr 1fr;
+}
+
+.offer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.deal-fixes {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.deal-slip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.deal-slip-actions .practice-again-button {
+  margin-top: 0;
+}
+
+.offer-card {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.offer-card > span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.offer-card h3 {
+  margin: 6px 0;
+  color: var(--text);
+  font-size: 1rem;
+  text-transform: capitalize;
+}
+
+.offer-card p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.offer-card strong {
+  color: var(--text);
+}
+
+.decision-note strong {
+  display: block;
+  margin-top: 7px;
+  color: var(--gold-strong);
+  font-size: 1.15rem;
+}
+
+.review-note p,
+.practice-list p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.readiness-brief > p {
+  color: rgba(245, 239, 230, 0.84);
+}
+
+.brief-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.brief-grid strong,
+.missing-list strong {
+  display: block;
+  color: var(--gold-strong);
+  font-size: 0.82rem;
+}
+
+.missing-list {
+  margin-top: 12px;
+}
+
+.pitch-note p {
+  color: #fff8ed;
+}
+
+.practice-again-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 13px;
+  color: #06070a;
+  background: rgba(255, 255, 255, 0.94);
+  font-weight: 900;
+}
+
+.skill-map {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.skill-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.skill-row strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.skill-row p {
+  margin: 3px 0 0;
+  font-size: 0.78rem;
+}
+
+.skill-row b {
+  display: grid;
+  place-items: center;
+  min-width: 38px;
+  height: 34px;
+  border-radius: 999px;
+  color: #06070a;
+  background: rgba(255, 255, 255, 0.94);
+  font-size: 0.92rem;
+}
+
+.drill-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.drill-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.drill-card h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.drill-card p {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+}
+
+.drill-card strong {
+  display: block;
+  margin-top: 8px;
+  color: #fff8ed;
+  font-size: 0.9rem;
+  line-height: 1.42;
+}
+
+.drill-card button {
+  min-height: 34px;
+  margin-top: 10px;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: #06070a;
+  background: rgba(255, 255, 255, 0.94);
+  font-weight: 900;
+}
+
+.drill-coach {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.drill-coach-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.drill-coach-head span,
+.drill-feedback span {
+  display: block;
+  color: rgba(245, 239, 230, 0.58);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.drill-coach-head h3 {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.drill-coach-head p,
+.drill-feedback p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
