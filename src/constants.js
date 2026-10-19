@@ -29,3 +29,25 @@ export const stageColors = {
 
 export const seatLayout = {
   nemotron: { position: [-1.92, 0.18, -3.08], rotation: 0.1, scale: 1.16, seated: true },
+  judge: { position: [0, 0.18, -3.08], rotation: 0, scale: 1.2, seated: true },
+  deepseek: { position: [1.92, 0.18, -3.08], rotation: -0.1, scale: 1.16, seated: true },
+};
+
+export const podiumLayout = {
+  nemotron: [-1.92, 0.06, -3.08],
+  judge: [0, 0.06, -3.08],
+  deepseek: [1.92, 0.06, -3.08],
+};
+
+export const deskLayout = {
+  position: [0, 0.1, -2.58],
+};
+
+export const cameraShots = {
+  wide: { x: 0, y: 1.1, z: 5.35, lookX: 0, lookY: 1.82, lookZ: -3.08 },
+  judge: { x: 0, y: 1.08, z: 5.0, lookX: 0, lookY: 1.86, lookZ: -3.12 },
+  nemotron: { x: -0.62, y: 1.08, z: 5.12, lookX: -1.42, lookY: 1.84, lookZ: -3.12 },
+  deepseek: { x: 0.62, y: 1.08, z: 5.12, lookX: 1.42, lookY: 1.84, lookZ: -3.12 },
+  tie: { x: 0, y: 1.1, z: 5.22, lookX: 0, lookY: 1.82, lookZ: -3.08 },
+  push: { x: 0, y: 1.06, z: 4.78, lookX: 0, lookY: 1.84, lookZ: -3.1 },
+};
