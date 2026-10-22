@@ -1703,3 +1703,308 @@ button:disabled {
   gap: 14px;
   align-items: start;
 }
+
+.dashboard-head span,
+.dashboard-meta span {
+  display: block;
+  color: rgba(245, 239, 230, 0.58);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.dashboard-head h3 {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 1.1rem;
+}
+
+.dashboard-head p,
+.dashboard-meta p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.dashboard-actions button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 13px;
+  color: #06070a;
+  background: rgba(255, 255, 255, 0.94);
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.dashboard-actions button + button {
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dashboard-skills {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.human-progress {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.human-progress div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.human-progress span,
+.attempt-list > span {
+  display: block;
+  color: rgba(245, 239, 230, 0.58);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.human-progress strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.dashboard-skill {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.dashboard-skill div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dashboard-skill strong,
+.dashboard-skill span {
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.dashboard-skill meter {
+  width: 100%;
+  height: 7px;
+}
+
+.dashboard-skill meter::-webkit-meter-bar {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dashboard-skill meter::-webkit-meter-optimum-value,
+.dashboard-skill meter::-webkit-meter-suboptimum-value,
+.dashboard-skill meter::-webkit-meter-even-less-good-value {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.training-plan {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.training-plan > span {
+  display: block;
+  color: rgba(245, 239, 230, 0.58);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.training-plan article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.training-plan b {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: #06070a;
+  background: rgba(255, 255, 255, 0.94);
+  font-size: 0.82rem;
+}
+
+.training-plan strong {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.training-plan p,
+.training-plan small {
+  display: block;
+  margin: 3px 0 0;
+  color: var(--muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.training-plan p {
+  font-size: 0.86rem;
+}
+
+.training-plan small {
+  font-size: 0.78rem;
+}
+
+.dashboard-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.attempt-list {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.attempt-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.attempt-list strong {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.attempt-list p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.attempt-list b {
+  display: grid;
+  place-items: center;
+  min-width: 38px;
+  height: 34px;
+  border-radius: 999px;
+  color: #06070a;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.session-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding: 14px 0;
+}
+
+.session-card:first-child {
+  border-top: 0;
+}
+
+.session-card span,
+.session-card small {
+  display: block;
+  color: rgba(245, 239, 230, 0.58);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.session-card h3 {
+  margin: 4px 0;
+  color: var(--text);
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.session-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.session-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.session-actions button,
+.session-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  text-decoration: none;
+}
+
+.session-actions button:first-child {
+  color: #06070a;
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.94);
+  font-weight: 900;
+}
+
+.library-empty {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  color: var(--muted);
+  text-align: center;
+}
+
