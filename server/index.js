@@ -1485,3 +1485,559 @@ function buildSimulationData({ prompt, practiceContext, brief, nemotron, deepsee
   };
 }
 
+function sendStream(response, event) {
+  response.write(`${JSON.stringify(event)}\n`);
+}
+
+function renderSharkRoomReportHtml(report) {
+  const rounds = Array.isArray(report.rounds) ? report.rounds : [];
+  const facts = Array.isArray(report.facts) ? report.facts : [];
+  const finalDeal = report.finalDeal || {};
+  const offers = Array.isArray(finalDeal.offers) ? finalDeal.offers : [];
+  const counters = Array.isArray(finalDeal.counterOffers) ? finalDeal.counterOffers : [];
+  const bestOffer = finalDeal.bestOffer || {};
+  const practiceDrills = Array.isArray(report.practiceDrills) ? report.practiceDrills : [];
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(report.businessTitle)} · AI Shark Tank Deal Memo</title>
+    <style>
+      :root { color: #111; background: #f7f7f4; font-family: Helvetica, "Helvetica Neue", Arial, sans-serif; }
+      body { margin: 0; }
+      main { width: min(980px, calc(100% - 32px)); margin: 0 auto; padding: 44px 0 72px; }
+      header { border-bottom: 1px solid #d8d8d3; padding-bottom: 24px; }
+      .kicker { color: #60605b; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+      h1 { margin: 8px 0 10px; font-size: clamp(34px, 6vw, 72px); line-height: .94; }
+      h2 { margin: 32px 0 12px; font-size: 26px; }
+      h3 { margin: 0 0 8px; font-size: 18px; }
+      p { color: #333; line-height: 1.55; }
+      .summary, .offers, .skills { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+      .box, .offer, .round, .drill { border: 1px solid #d8d8d3; border-radius: 10px; padding: 16px; background: #fff; }
+      .box span, .offer span, .round span, .drill span { display: block; color: #777; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+      .box strong { display: block; margin-top: 6px; font-size: 22px; }
+      .offer strong { text-transform: capitalize; }
+      ul { padding-left: 20px; }
+      li { margin: 7px 0; color: #333; }
+      .round { margin-top: 14px; }
+      .answer { border-top: 1px solid #ecece7; margin-top: 12px; padding-top: 12px; }
+      .muted { color: #666; }
+      @media print { body { background: #fff; } main { width: auto; padding: 24px; } .box, .offer, .round { break-inside: avoid; } }
+      @media (max-width: 760px) { .summary, .offers, .skills { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="kicker">AI Shark Tank Deal Memo</div>
+        <h1>${escapeHtml(report.businessTitle)}</h1>
+        <p>${escapeHtml(report.promptSummary)}</p>
+        <p class="muted">Generated ${escapeHtml(new Date(report.generatedAt).toLocaleString())}</p>
+        <div class="summary">
+          <div class="box"><span>Outcome</span><strong>${escapeHtml(finalDeal.outcome || winnerName(report.winner))}</strong></div>
+          <div class="box"><span>Best offer</span><strong>${escapeHtml(bestOffer.label || bestOffer.shark || "None")}</strong></div>
+          <div class="box"><span>Rounds</span><strong>${escapeHtml(rounds.length)}</strong></div>
+        </div>
+      </header>
+
+      <section>
+        <h2>Business Facts</h2>
+        <ul>${facts.map((fact) => `<li>${escapeHtml(fact)}</li>`).join("")}</ul>
+      </section>
+
+      <section>
+        <h2>Final Deal</h2>
+        <p>${escapeHtml(finalDeal.verdict || "")}</p>
+        <div class="offers">
+          ${offers.map((offer) => `
+            <article class="offer">
+              <span>${escapeHtml(offer.label)}</span>
+              <h3>${escapeHtml(offer.decision)}</h3>
+              <p><strong>${escapeHtml(offer.amount || "No check")}</strong>${offer.equity ? ` for ${escapeHtml(offer.equity)}` : ""}</p>
+              <p>${escapeHtml(offer.rationale)}</p>
+              <ul>${(offer.conditions || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+            </article>
+          `).join("")}
+        </div>
+      </section>
+
+      ${counters.length ? `
+      <section>
+        <h2>Counter-Offers</h2>
+        ${counters.map((counter) => `
+          <article class="round">
+            <span>${escapeHtml(counter.label)} · ${escapeHtml(counter.decision)}</span>
+            <p>${escapeHtml(counter.message)}</p>
+            <p><strong>${escapeHtml(counter.revisedAmount || "")}</strong>${counter.revisedEquity ? ` for ${escapeHtml(counter.revisedEquity)}` : ""}</p>
+            <p class="muted">${escapeHtml(counter.finalAdvice)}</p>
+          </article>
+        `).join("")}
+      </section>` : ""}
+
+      <section>
+        <h2>Practice Notes</h2>
+        <p><strong>Strongest answer:</strong> ${escapeHtml(finalDeal.strongestAnswer || "")}</p>
+        <p><strong>Weakest answer:</strong> ${escapeHtml(finalDeal.weakestAnswer || "")}</p>
+        <ul>${(finalDeal.nextPractice || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </section>
+
+      <section>
+        <h2>Practice Drills</h2>
+        ${practiceDrills.map((drill) => `
+          <article class="drill">
+            <span>${escapeHtml(drill.name)}</span>
+            <p>${escapeHtml(drill.goal)}</p>
+            <p><strong>${escapeHtml(drill.prompt)}</strong></p>
+          </article>
+        `).join("")}
+      </section>
+
+      <section>
+        <h2>Transcript</h2>
+        ${rounds.map((round, index) => `
+          <article class="round">
+            <span>Round ${index + 1} · ${escapeHtml(round.focus)}</span>
+            <h3>${escapeHtml(round.panelQuestion)}</h3>
+            <p><strong>Founder answer:</strong> ${escapeHtml(round.userAnswer)}</p>
+            ${sharkKeys.map((key) => {
+              const reaction = round.sharkReactions?.[key] || {};
+              return `<div class="answer"><strong>${escapeHtml(sharkLabel(key))} · ${escapeHtml(round.scores?.[key] ?? "-")}</strong><p>${escapeHtml(reaction.reaction || "")}</p><p class="muted">${escapeHtml(reaction.pressure || "")}</p></div>`;
+            }).join("")}
+          </article>
+        `).join("")}
+      </section>
+    </main>
+  </body>
+</html>`;
+}
+
+function renderReportHtml(report) {
+  if (report.kind === "user-shark-room") {
+    return renderSharkRoomReportHtml(report);
+  }
+
+  const rounds = Array.isArray(report.rounds) ? report.rounds : [];
+  const negotiation = report.negotiation || {};
+  const facts = Array.isArray(report.facts) ? report.facts : [];
+  const practice = Array.isArray(report.nextPractice) ? report.nextPractice : [];
+  const hooks = Array.isArray(report.investorHooks) ? report.investorHooks : [];
+  const objections = Array.isArray(report.investorObjections) ? report.investorObjections : [];
+  const dataToCollect = Array.isArray(report.nextDataToCollect) ? report.nextDataToCollect : [];
+  const diagnostics = report.promptDiagnostics || {};
+  const missingFacts = Array.isArray(diagnostics.missingFacts) ? diagnostics.missingFacts : [];
+  const skillScores = Array.isArray(report.skillScores) ? report.skillScores : [];
+  const practiceDrills = Array.isArray(report.practiceDrills) ? report.practiceDrills : [];
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(report.businessTitle)} · AI Shark Tank Report</title>
+    <style>
+      :root { color: #111; background: #f7f7f4; font-family: Helvetica, "Helvetica Neue", Arial, sans-serif; }
+      body { margin: 0; }
+      main { width: min(980px, calc(100% - 32px)); margin: 0 auto; padding: 44px 0 72px; }
+      header { border-bottom: 1px solid #d8d8d3; padding-bottom: 24px; }
+      .kicker { color: #60605b; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+      h1 { margin: 8px 0 10px; font-size: clamp(34px, 6vw, 72px); line-height: .94; letter-spacing: -0.03em; }
+      h2 { margin: 32px 0 12px; font-size: 26px; letter-spacing: -0.02em; }
+      h3 { margin: 0 0 8px; font-size: 18px; }
+      p { color: #333; line-height: 1.55; }
+      .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 22px; }
+      .box { border: 1px solid #d8d8d3; border-radius: 10px; padding: 16px; background: #fff; }
+      .box span { display: block; color: #777; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+      .box strong { display: block; margin-top: 6px; font-size: 22px; }
+      ul { padding-left: 20px; }
+      li { margin: 7px 0; color: #333; }
+      .round { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; border-top: 1px solid #d8d8d3; padding-top: 18px; margin-top: 18px; }
+      .round-head { grid-column: 1 / -1; }
+      .answer { background: #fff; border: 1px solid #deded9; border-radius: 10px; padding: 16px; }
+      .score { color: #111; font-weight: 800; }
+      .decision { border: 2px solid #111; border-radius: 12px; padding: 18px; background: #fff; }
+      .skills { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+      .skill { border: 1px solid #d8d8d3; border-radius: 10px; padding: 14px; background: #fff; }
+      .skill strong { display: block; font-size: 22px; }
+      .skill span { color: #777; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+      .drills { display: grid; gap: 12px; }
+      .drill { border: 1px solid #d8d8d3; border-radius: 10px; padding: 14px; background: #fff; }
+      .muted { color: #666; }
+      @media print { body { background: #fff; } main { width: auto; padding: 24px; } .box, .answer, .decision { break-inside: avoid; } }
+      @media (max-width: 760px) { .summary, .round, .skills { grid-template-columns: 1fr; } .round-head { grid-column: auto; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="kicker">AI Shark Tank Final Report</div>
+        <h1>${escapeHtml(report.businessTitle)}</h1>
+        <p>${escapeHtml(report.promptSummary)}</p>
+        <p class="muted">Generated ${escapeHtml(new Date(report.generatedAt).toLocaleString())}</p>
+        <div class="summary">
+          <div class="box"><span>Winner</span><strong>${escapeHtml(winnerName(report.winner))}</strong></div>
+          <div class="box"><span>${escapeHtml(modelConfig.nemotron.label.replace(" Founder", ""))}</span><strong>${escapeHtml(report.totals?.nemotron ?? "-")}</strong></div>
+          <div class="box"><span>DeepSeek</span><strong>${escapeHtml(report.totals?.deepseek ?? "-")}</strong></div>
+          <div class="box"><span>Readiness</span><strong>${escapeHtml(report.readinessScore ?? "-")}</strong></div>
+        </div>
+      </header>
+
+      <section>
+        <h2>Practice Context</h2>
+        <p><strong>Stage:</strong> ${escapeHtml(report.practiceContext?.stageLabel || "Early Traction")}</p>
+        <p><strong>Objective:</strong> ${escapeHtml(report.practiceContext?.objectiveLabel || "Growth Plan")}</p>
+        <p><strong>Room:</strong> ${escapeHtml(report.practiceContext?.lengthLabel || `${rounds.length} rounds`)}</p>
+      </section>
+
+      <section>
+        <h2>Business Facts</h2>
+        <ul>${facts.map((fact) => `<li>${escapeHtml(fact)}</li>`).join("")}</ul>
+      </section>
+
+      <section>
+        <h2>Founder Readiness Brief</h2>
+        <p><strong>Stage fit:</strong> ${escapeHtml(diagnostics.stageFit || "")}</p>
+        <p><strong>Strongest signal:</strong> ${escapeHtml(diagnostics.strongestSignal || "")}</p>
+        <p><strong>First practice move:</strong> ${escapeHtml(diagnostics.firstPracticeMove || "")}</p>
+        <ul>${missingFacts.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </section>
+
+      <section>
+        <h2>Practice Pitch</h2>
+        <p>${escapeHtml(report.rewrittenPitch || "")}</p>
+        <p><strong>Ask framing:</strong> ${escapeHtml(report.recommendedAskFraming || "")}</p>
+      </section>
+
+      <section>
+        <h2>Founder Skill Map</h2>
+        <div class="skills">
+          ${skillScores.map((skill) => `
+            <div class="skill">
+              <span>${escapeHtml(skill.label)}</span>
+              <strong>${escapeHtml(skill.score ?? "-")}</strong>
+              <p>${escapeHtml(skill.note || "")}</p>
+            </div>
+          `).join("")}
+        </div>
+      </section>
+
+      <section>
+        <h2>Practice Drills</h2>
+        <div class="drills">
+          ${practiceDrills.map((drill) => `
+            <div class="drill">
+              <h3>${escapeHtml(drill.name)}</h3>
+              <p><strong>Goal:</strong> ${escapeHtml(drill.goal)}</p>
+              <p><strong>Rehearse:</strong> ${escapeHtml(drill.prompt)}</p>
+            </div>
+          `).join("")}
+        </div>
+      </section>
+
+      <section>
+        <h2>Final Negotiation</h2>
+        <div class="decision">
+          <h3>${escapeHtml(negotiation.decision || "Final decision")}</h3>
+          <p><strong>Offer:</strong> ${escapeHtml(negotiation.offer || "No formal offer.")}</p>
+          <p><strong>Negotiation:</strong> ${escapeHtml(negotiation.negotiationSummary || "")}</p>
+          <p><strong>Reason:</strong> ${escapeHtml(negotiation.reason || report.verdict || "")}</p>
+        </div>
+      </section>
+
+      <section>
+        <h2>Round Transcript</h2>
+        ${rounds.map((round, index) => `
+          <article class="round">
+            <div class="round-head">
+              <div class="kicker">Round ${index + 1} · ${escapeHtml(round.focus)}</div>
+              <h3>${escapeHtml(round.question)}</h3>
+              <p><strong>${escapeHtml(winnerName(round.winner))}</strong>: ${escapeHtml(round.judgeComment)}</p>
+            </div>
+            <div class="answer">
+              <h3>${escapeHtml(modelConfig.nemotron.label)} <span class="score">${escapeHtml(round.scores?.nemotron ?? "-")}</span></h3>
+              <p>${escapeHtml(round.nemotron?.answer)}</p>
+              <p class="muted">${escapeHtml(round.nemotron?.boldMove)}</p>
+            </div>
+            <div class="answer">
+              <h3>DeepSeek Founder <span class="score">${escapeHtml(round.scores?.deepseek ?? "-")}</span></h3>
+              <p>${escapeHtml(round.deepseek?.answer)}</p>
+              <p class="muted">${escapeHtml(round.deepseek?.boldMove)}</p>
+            </div>
+          </article>
+        `).join("")}
+      </section>
+
+      <section>
+        <h2>Practice Notes</h2>
+        <p><strong>Strongest moment:</strong> ${escapeHtml(report.strongestMoment)}</p>
+        <p><strong>Weakest moment:</strong> ${escapeHtml(report.weakestMoment)}</p>
+        <h3>Investor hooks</h3>
+        <ul>${hooks.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        <h3>Objections to rehearse</h3>
+        <ul>${objections.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        <h3>Data to collect</h3>
+        <ul>${dataToCollect.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        <ul>${practice.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </section>
+    </main>
+  </body>
+</html>`;
+}
+
+async function createInvestorBrief({ prompt, practiceContext }) {
+  const raw = await callJson({
+    role: modelConfig.deepseek,
+    temperature: 0.35,
+    maxTokens: 2200,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a disciplined Shark Tank-style investor judge. Extract facts, expose risk, and write concise investor questions. Return JSON only.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "The user gave one natural-language business prompt.",
+              "Extract only what is stated or safely inferred. Do not invent traction, revenue, customers, profit, or investment terms.",
+              "Also diagnose whether the founder gave enough information for their selected stage and what proof is missing.",
+              `Create exactly ${practiceContext.roundCount} investor questions for a two-founder model duel.`,
+              "Adapt the questions to this practice context:",
+              practiceContextPrompt(practiceContext),
+              "Do not ask all questions as if the company is mature. Real investor practice must work for idea-stage, early traction, scaling, and fundraising-stage founders.",
+              "",
+              "Return JSON with this shape:",
+              JSON.stringify({
+                businessTitle: "short title",
+                promptSummary: "one sentence summary",
+                facts: ["fact from prompt"],
+                promptDiagnostics: {
+                  stageFit: "whether the chosen stage matches the facts and what to watch",
+                  missingFacts: ["important missing founder detail"],
+                  strongestSignal: "best fact or signal already in the prompt",
+                  firstPracticeMove: "first thing the founder should tighten before answering investors",
+                },
+                questions: fallbackQuestions.slice(0, practiceContext.roundCount).map((question, index) => ({
+                  id: `round-${index + 1}`,
+                  title: "round title",
+                  focus: "what this round tests",
+                  question,
+                })),
+              }),
+              "",
+              `Business prompt:\n${prompt}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  const questions = Array.isArray(raw.questions) ? raw.questions : [];
+  const normalizedQuestions = fallbackQuestions.slice(0, practiceContext.roundCount).map((fallback, index) => {
+    const question = questions[index] || {};
+    return {
+      id: `round-${index + 1}`,
+      title: sanitizeInput(question.title, `Round ${index + 1}`).slice(0, 64),
+      focus: sanitizeInput(question.focus, "Investor confidence").slice(0, 140),
+      question: sanitizeInput(question.question, fallback).slice(0, 420),
+    };
+  });
+
+  return {
+    businessTitle: sanitizeInput(raw.businessTitle, "Founder Duel").slice(0, 80),
+    promptSummary: sanitizeInput(raw.promptSummary, prompt).slice(0, 260),
+    facts: Array.isArray(raw.facts)
+      ? raw.facts.slice(0, 8).map((fact) => sanitizeInput(fact).slice(0, 180))
+      : [],
+    promptDiagnostics: normalizePromptDiagnostics(raw.promptDiagnostics),
+    questions: normalizedQuestions,
+  };
+}
+
+function normalizeFounderPrep(raw = {}, prompt, practiceContext) {
+  return {
+    generatedAt: new Date().toISOString(),
+    practiceContext,
+    businessTitle: sanitizeInput(raw.businessTitle, "Founder Prep").slice(0, 80),
+    promptSummary: sanitizeInput(raw.promptSummary, prompt).slice(0, 260),
+    readinessScore: toScore(raw.readinessScore, 62),
+    stageFit: sanitizeInput(
+      raw.stageFit,
+      "The prompt has enough information to begin investor practice, but the founder should tighten the proof and milestone.",
+    ).slice(0, 260),
+    strongestSignal: sanitizeInput(
+      raw.strongestSignal,
+      "The strongest signal is the clearest traction, customer insight, or proof already stated.",
+    ).slice(0, 220),
+    missingFacts: Array.isArray(raw.missingFacts)
+      ? raw.missingFacts.slice(0, 5).map((item) => sanitizeInput(item).slice(0, 160))
+      : [],
+    pitchAngle: sanitizeInput(
+      raw.pitchAngle,
+      "Frame the business around the urgent customer pain, the current proof, and the next fundable milestone.",
+    ).slice(0, 320),
+    rewrittenPitch: sanitizeInput(
+      raw.rewrittenPitch,
+      "Practice a tighter pitch that names the customer, pain, proof, business model, ask, and next milestone.",
+    ).slice(0, 900),
+    askFraming: sanitizeInput(
+      raw.askFraming,
+      "Tie the ask to a measurable milestone and explain how it reduces the biggest investor risk.",
+    ).slice(0, 320),
+    likelyFirstQuestions: Array.isArray(raw.likelyFirstQuestions)
+      ? raw.likelyFirstQuestions.slice(0, 4).map((item) => sanitizeInput(item).slice(0, 220))
+      : fallbackQuestions.slice(0, Math.min(4, practiceContext.roundCount)),
+    scaleLevers: Array.isArray(raw.scaleLevers)
+      ? raw.scaleLevers.slice(0, 4).map((item) => sanitizeInput(item).slice(0, 180))
+      : [],
+    riskWatch: Array.isArray(raw.riskWatch)
+      ? raw.riskWatch.slice(0, 4).map((item) => sanitizeInput(item).slice(0, 180))
+      : [],
+    nextMove: sanitizeInput(
+      raw.nextMove,
+      "Answer the first investor question in 45 seconds with one customer, one metric, one risk, and one milestone.",
+    ).slice(0, 260),
+  };
+}
+
+function normalizeDrillFeedback(raw = {}, answer) {
+  return {
+    generatedAt: new Date().toISOString(),
+    score: toScore(raw.score, 60),
+    verdict: sanitizeInput(
+      raw.verdict,
+      "The answer has a useful foundation, but it needs tighter proof, numbers, and a clearer investor milestone.",
+    ).slice(0, 260),
+    strongestLine: sanitizeInput(
+      raw.strongestLine,
+      "The strongest part was naming the business direction.",
+    ).slice(0, 200),
+    missingProof: Array.isArray(raw.missingProof)
+      ? raw.missingProof.slice(0, 4).map((item) => sanitizeInput(item).slice(0, 160))
+      : [],
+    sharperAnswer: sanitizeInput(
+      raw.sharperAnswer,
+      answer || "Practice a direct answer with one customer, one metric, one risk, and one next milestone.",
+    ).slice(0, 900),
+    investorFollowUp: sanitizeInput(
+      raw.investorFollowUp,
+      "What proof can you show that this answer is repeatable and not a one-off result?",
+    ).slice(0, 260),
+    nextPracticeMove: sanitizeInput(
+      raw.nextPracticeMove,
+      "Repeat the answer in 45 seconds and replace one vague claim with a metric or customer example.",
+    ).slice(0, 260),
+  };
+}
+
+async function createDrillFeedback({ prompt, practiceContext, report, drill, answer }) {
+  const raw = await callJson({
+    role: modelConfig.deepseek,
+    temperature: 0.3,
+    maxTokens: 1200,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are an investor pitch coach. Score a founder's practice answer, identify missing proof, and rewrite it into a stronger investor-ready answer. Return JSON only.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Judge this founder's answer to one practice drill.",
+              "Do not invent new business facts. If the founder did not provide proof, say what proof is missing.",
+              "Score relative to the founder stage and practice objective.",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "",
+              "Return JSON with this shape:",
+              JSON.stringify({
+                score: 0,
+                verdict: "brief coaching verdict",
+                strongestLine: "best part of the answer",
+                missingProof: ["specific proof missing"],
+                sharperAnswer: "stronger answer the founder should practice",
+                investorFollowUp: "one follow-up investor question",
+                nextPracticeMove: "one immediate practice move",
+              }),
+              "",
+              `Business prompt:\n${prompt}`,
+              "",
+              `Report context:\n${JSON.stringify({
+                businessTitle: report?.businessTitle,
+                promptSummary: report?.promptSummary,
+                readinessScore: report?.readinessScore,
+                weakestMoment: report?.weakestMoment,
+                recommendedAskFraming: report?.recommendedAskFraming,
+              })}`,
+              "",
+              `Practice drill:\n${JSON.stringify(drill)}`,
+              "",
+              `Founder answer:\n${answer}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  return normalizeDrillFeedback(raw, answer);
+}
+
+async function createFounderPrep({ prompt, practiceContext }) {
+  const raw = await callJson({
+    role: modelConfig.deepseek,
+    temperature: 0.28,
+    maxTokens: 1500,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a Founder Coach and Shark Tank investor judge. Prepare founders for investor practice with concise, practical feedback. Return JSON only.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Create a lightweight prep brief before the full AI Shark Tank duel.",
+              "Use only the user's stated facts or clearly label missing proof. Do not invent revenue, customers, margins, traction, valuation, or team details.",
+              "Make this useful for idea-stage founders and scaled businesses. Judge readiness relative to the selected stage and focus.",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "",
+              "Return JSON with this shape:",
+              JSON.stringify({
+                businessTitle: "short title",
+                promptSummary: "one sentence business summary",
+                readinessScore: 0,
+                stageFit: "whether the selected stage fits the facts and what to watch",
+                strongestSignal: "best proof or insight already in the prompt",
+                missingFacts: ["specific missing investor detail"],
+                pitchAngle: "best strategic pitch angle for this practice room",
+                rewrittenPitch: "tight 45-60 second investor pitch to rehearse",
+                askFraming: "how to frame the ask or next milestone",
+                likelyFirstQuestions: ["hard investor question"],
+                scaleLevers: ["specific way this business could scale from its current facts"],
+                riskWatch: ["risk or objection investor will press"],
+                nextMove: "one immediate practice action before running the duel",
+              }),
+              "",
+              `Business prompt:\n${prompt}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  return normalizeFounderPrep(raw, prompt, practiceContext);
+}
+
