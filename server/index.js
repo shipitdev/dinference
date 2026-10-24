@@ -2041,3 +2041,618 @@ async function createFounderPrep({ prompt, practiceContext }) {
   return normalizeFounderPrep(raw, prompt, practiceContext);
 }
 
+async function createFounderAnswers({ founder, prompt, brief, strict = false }) {
+  const style =
+    founder === "nemotron"
+      ? "You are Founder A. You are operationally rigorous, numerical, direct, and execution-focused."
+      : "You are Founder B. You are strategically sharp, market-aware, narrative-driven, and growth-focused.";
+
+  let raw;
+  try {
+    raw = await callJson({
+      role: modelConfig[founder],
+      temperature: 0.72,
+      maxTokens: 3200,
+      messages: [
+        {
+          role: "system",
+          content: [
+            style,
+            "Pitch the exact business described by the user. You may choose a different strategy, but you must not invent contradictory facts.",
+            "Never output placeholders, ellipses, templates, or generic coaching advice. Answer as the founder in the room.",
+            "Do not preface answers with phrases like 'Here's the pitch', 'Here's the answer', or 'Sure'. Start directly with the pitch content.",
+            strict ? "This is a retry because the previous output was too generic. Use the user's actual numbers and business details in every answer." : "",
+            "Return JSON only.",
+          ].filter(Boolean).join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: [
+                "Answer every investor question as if you are competing against another founder pitching the same business.",
+                "Use the user's facts. If a number is missing, say what you would validate next instead of inventing it.",
+                "",
+                "Return JSON with this shape:",
+                JSON.stringify({
+                  openingPosition: "one sentence positioning",
+                  answers: brief.questions.map((question, index) => ({
+                    id: question.id,
+                    answer: `answer to investor question ${index + 1}`,
+                    boldMove: `specific scale move after question ${index + 1}`,
+                  })),
+                }),
+                "",
+                `Business prompt:\n${prompt}`,
+                "",
+                `Investor brief:\n${JSON.stringify(brief)}`,
+              ].join("\n"),
+            },
+          ],
+        },
+      ],
+    });
+  } catch {
+    return createFounderAnswersPlain({ founder, prompt, brief, style });
+  }
+
+  const answers = Array.isArray(raw.answers) ? raw.answers : [];
+  const result = {
+    openingPosition: sanitizeInput(raw.openingPosition, "We will turn this business into a focused, fundable wedge.").slice(0, 240),
+    answers: brief.questions.map((question, index) => {
+      const answer = answers.find((item) => item?.id === question.id) || answers[index] || {};
+      const answerKey = `round${index + 1}Answer`;
+      const moveKey = `round${index + 1}Move`;
+      return {
+        id: question.id,
+        answer: sanitizeInput(
+          answer.answer || raw[answerKey],
+          "I would focus the pitch on the clearest customer pain, the current proof, and the next measurable milestone.",
+        ).slice(0, 1000),
+        boldMove: sanitizeInput(
+          answer.boldMove || raw[moveKey],
+          "Validate willingness to pay with a small, specific customer segment.",
+        ).slice(0, 260),
+      };
+    }),
+  };
+
+  if (
+    !strict &&
+    (isWeakPitchText(result.openingPosition) ||
+      result.answers.some((answer) => isWeakPitchText(answer.answer)))
+  ) {
+    return createFounderAnswers({ founder, prompt, brief, strict: true });
+  }
+
+  if (strict && result.answers.some((answer) => isWeakPitchText(answer.answer))) {
+    return createFounderAnswersPlain({ founder, prompt, brief, style });
+  }
+
+  return result;
+}
+
+function extractPlainSection(text, label, fallback) {
+  const pattern = new RegExp(`${label}:\\\\s*([\\\\s\\\\S]*?)(?=\\\\n(?:OPENING|ROUND \\\\d+ ANSWER|ROUND \\\\d+ MOVE):|$)`, "i");
+  const match = text.match(pattern);
+  return sanitizeInput(match?.[1], fallback);
+}
+
+async function createFounderAnswersPlain({ founder, prompt, brief, style }) {
+  const text = await callText({
+    role: modelConfig[founder],
+    temperature: 0.62,
+    maxTokens: 2600,
+    messages: [
+      {
+        role: "system",
+        content: [
+          style,
+          "Answer as the founder in a live investor room.",
+          "Use actual details from the business prompt.",
+          "Do not preface answers with phrases like 'Here's the pitch', 'Here's the answer', or 'Sure'. Start directly with the pitch content.",
+          "Do not output JSON. Do not output placeholders. Do not give generic advice.",
+        ].join(" "),
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Write exactly these labels, with real founder answers after each label:",
+              "OPENING:",
+              ...brief.questions.flatMap((_round, index) => [
+                `ROUND ${index + 1} ANSWER:`,
+                `ROUND ${index + 1} MOVE:`,
+              ]),
+              "",
+              `Business prompt:\n${prompt}`,
+              "",
+              `Investor questions:\n${brief.questions
+                .map((round, index) => `ROUND ${index + 1}: ${round.question}`)
+                .join("\n")}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  return {
+    openingPosition: extractPlainSection(text, "OPENING", "We will pitch this business using its real traction, current bottleneck, and next funding milestone.").slice(0, 240),
+    answers: brief.questions.map((question, index) => ({
+      id: question.id,
+      answer: extractPlainSection(
+        text,
+        `ROUND ${index + 1} ANSWER`,
+        "This business already has concrete traction, and the next pitch should tie that traction to the clearest bottleneck and funding milestone.",
+      ).slice(0, 1000),
+      boldMove: extractPlainSection(
+        text,
+        `ROUND ${index + 1} MOVE`,
+        "Validate the next growth step with a measurable experiment.",
+      ).slice(0, 260),
+    })),
+  };
+}
+
+async function createFounderRoundAnswer({ founder, prompt, practiceContext, brief, round, index, strict = false }) {
+  const isNemotron = founder === "nemotron";
+  const style = isNemotron
+    ? [
+        "You are Founder A.",
+        "You pitch a creative scaling plan through operations: standardized packages, hiring systems, throughput, margin control, automation, retention loops, and measurable milestones.",
+        "You are numerical, direct, and execution-focused.",
+      ].join(" ")
+    : [
+        "You are Founder B.",
+        "You pitch a creative scaling plan through strategy: category positioning, partnerships, product/data layer, distribution loops, expansion segments, and defensibility.",
+        "You are market-aware, narrative-driven, and growth-focused.",
+      ].join(" ");
+
+  let raw;
+  try {
+    raw = await callJson({
+      role: modelConfig[founder],
+      temperature: 0.68,
+      maxTokens: 1100,
+      messages: [
+        {
+          role: "system",
+          content: [
+            style,
+            "Answer as the founder in a live investor room.",
+            "Every answer must include a concrete scaling angle for this exact business.",
+            "Adapt the answer to the founder's current stage and practice objective.",
+            practiceContextPrompt(practiceContext),
+            "Use the user's stated facts. Do not invent contradictory traction, revenue, customers, profit, or terms.",
+            "Do not preface answers with phrases like 'Here's the pitch', 'Here's the answer', or 'Sure'. Start directly with the pitch content.",
+            "Return JSON only.",
+            strict ? "This is a retry. Be specific, answer the exact question, include the user's real numbers where relevant, and make the scale plan sharper." : "",
+          ].filter(Boolean).join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: [
+                "Answer this one investor question for the same business.",
+                "Do not merely repeat the prompt. Explain the next fundable move from the current stage, evidence, revenue, customers, margin, and ask if those details exist.",
+                isNemotron
+                  ? "Founder A should focus on operational scaling: hiring plan, delivery capacity, process, margin, automation, and milestones."
+                  : "Founder B should focus on strategic scaling: wedge, partnerships, distribution, product/data layer, market expansion, and moat.",
+                "The boldMove must be one specific scaling move that could happen next.",
+                `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+                "Return JSON with this shape:",
+                JSON.stringify({
+                  openingPosition: "one sentence positioning, only needed for round 1",
+                  answer: "direct founder answer",
+                  boldMove: "one concrete next move",
+                }),
+                "",
+                `Business prompt:\n${prompt}`,
+                "",
+                `Extracted facts:\n${brief.facts.map((fact) => `- ${fact}`).join("\n")}`,
+                "",
+                `Round ${index + 1}: ${round.title}`,
+                `Investor question: ${round.question}`,
+                `What this tests: ${round.focus}`,
+              ].join("\n"),
+            },
+          ],
+        },
+      ],
+    });
+  } catch (error) {
+    throw new Error(`${modelConfig[founder].label} could not answer round ${index + 1}: ${error.message}`);
+  }
+
+  const answerText = sanitizeInput(raw.answer);
+  if (!answerText) {
+    throw new Error(`${modelConfig[founder].label} returned an empty answer for round ${index + 1}.`);
+  }
+
+  const result = {
+    openingPosition: sanitizeInput(raw.openingPosition, answerText).slice(0, 240),
+    id: round.id,
+    answer: answerText.slice(0, 1000),
+    boldMove: sanitizeInput(raw.boldMove, "No next move provided.").slice(0, 260),
+  };
+
+  if (!strict && isWeakPitchText(result.answer)) {
+    return createFounderRoundAnswer({ founder, prompt, practiceContext, brief, round, index, strict: true });
+  }
+
+  return result;
+}
+
+async function judgeSingleRound({ prompt, practiceContext, brief, round, nemotronAnswer, deepseekAnswer }) {
+  const raw = await callJson({
+    role: modelConfig.judge,
+    temperature: 0.34,
+    maxTokens: 900,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are the investor judge. Score one round of a two-founder Shark Tank duel. Return JSON only.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Score this one round from 0-100.",
+              "Choose winner as nemotron, deepseek, or tie. Penalize vague answers and invented facts.",
+              "Score relative to the founder stage and practice objective, not as a generic mature-company pitch.",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "Return JSON with this shape:",
+              JSON.stringify({
+                nemotronScore: 0,
+                deepseekScore: 0,
+                winner: "nemotron",
+                judgeComment: "brief reason",
+              }),
+              "",
+              `Original business prompt:\n${prompt}`,
+              "",
+              `Extracted facts:\n${brief.facts.map((fact) => `- ${fact}`).join("\n")}`,
+              "",
+              `Investor question: ${round.question}`,
+              "",
+              `${modelConfig.nemotron.label} answer:\n${JSON.stringify(nemotronAnswer)}`,
+              "",
+              `DeepSeek answer:\n${JSON.stringify(deepseekAnswer)}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  const nemotronScore = isWeakPitchText(nemotronAnswer?.answer) ? 15 : toScore(raw.nemotronScore, 68);
+  const deepseekScore = isWeakPitchText(deepseekAnswer?.answer) ? 15 : toScore(raw.deepseekScore, 68);
+  const winner =
+    ["nemotron", "deepseek", "tie"].includes(raw.winner)
+      ? raw.winner
+      : nemotronScore === deepseekScore
+        ? "tie"
+        : nemotronScore > deepseekScore
+          ? "nemotron"
+          : "deepseek";
+
+  return {
+    ...round,
+    nemotron: nemotronAnswer,
+    deepseek: deepseekAnswer,
+    scores: {
+      nemotron: nemotronScore,
+      deepseek: deepseekScore,
+    },
+    winner,
+    judgeComment: sanitizeInput(
+      raw.judgeComment,
+      winner === "tie"
+        ? "Both founders made a credible but incomplete case."
+        : `${winnerName(winner)} gave the more investor-ready answer.`,
+    ).slice(0, 280),
+  };
+}
+
+async function createFinalReview({ prompt, practiceContext, brief, rounds, totals, winner }) {
+  const raw = await callJson({
+    role: modelConfig.judge,
+    temperature: 0.32,
+    maxTokens: 1400,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are the investor judge. Write the final review after all scored rounds. Return JSON only.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Write a concise final review. Use the computed winner unless there is a scoring tie.",
+              "Make this useful for founder practice, not just entertainment.",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "Return JSON with this shape:",
+              JSON.stringify({
+                verdict: "final investor verdict",
+                readinessScore: 0,
+                skillScores: {
+                  clarity: { score: 0, note: "pitch clarity note" },
+                  proof: { score: 0, note: "traction or validation note" },
+                  economics: { score: 0, note: "pricing, margin, and unit economics note" },
+                  scale: { score: 0, note: "repeatable growth and operations note" },
+                  moat: { score: 0, note: "competition and defensibility note" },
+                  deal: { score: 0, note: "ask, terms, and milestone note" },
+                },
+                strongestMoment: "best answer or proof",
+                weakestMoment: "biggest fix",
+                rewrittenPitch: "tight 60-second pitch the founder should practice",
+                investorHooks: ["strongest investor hook"],
+                investorObjections: ["objection the founder must rehearse"],
+                nextDataToCollect: ["specific proof or data to collect next"],
+                recommendedAskFraming: "how to frame the ask and milestone",
+                practiceDrills: [
+                  {
+                    name: "drill name",
+                    goal: "what this improves",
+                    prompt: "specific investor question or timed rehearsal prompt",
+                  },
+                ],
+                nextPractice: ["practice item"],
+              }),
+              "",
+              `Original business prompt:\n${prompt}`,
+              "",
+              `Investor brief:\n${JSON.stringify(brief)}`,
+              "",
+              `Computed totals:\n${JSON.stringify({ totals, winner })}`,
+              "",
+              `Scored rounds:\n${JSON.stringify(rounds)}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  return {
+    rounds,
+    totals,
+    winner,
+    verdict: sanitizeInput(
+      raw.verdict,
+      winner === "tie"
+        ? "The investor could not separate the two founders; both need sharper proof and clearer terms."
+        : `${winnerName(winner)} made the stronger investor case across the full investor room.`,
+    ).slice(0, 320),
+    readinessScore: toScore(raw.readinessScore, Math.round((totals.nemotron + totals.deepseek) / 2)),
+    skillScores: normalizeSkillScores(raw.skillScores),
+    strongestMoment: sanitizeInput(raw.strongestMoment, rounds.find((round) => round.winner === winner)?.judgeComment || "The strongest answer connected the business facts to a concrete next milestone.").slice(0, 260),
+    weakestMoment: sanitizeInput(raw.weakestMoment, "The weakest area was turning claims into investor-grade proof.").slice(0, 260),
+    rewrittenPitch: sanitizeInput(raw.rewrittenPitch, "Practice a tighter pitch that names the customer, urgent problem, proof, business model, and next milestone.").slice(0, 900),
+    investorHooks: Array.isArray(raw.investorHooks)
+      ? raw.investorHooks.slice(0, 3).map((item) => sanitizeInput(item).slice(0, 180))
+      : [],
+    investorObjections: Array.isArray(raw.investorObjections)
+      ? raw.investorObjections.slice(0, 4).map((item) => sanitizeInput(item).slice(0, 180))
+      : [],
+    nextDataToCollect: Array.isArray(raw.nextDataToCollect)
+      ? raw.nextDataToCollect.slice(0, 4).map((item) => sanitizeInput(item).slice(0, 180))
+      : [],
+    recommendedAskFraming: sanitizeInput(raw.recommendedAskFraming, "Tie the ask to one measurable milestone and the evidence needed to de-risk the next round.").slice(0, 320),
+    practiceDrills: normalizePracticeDrills(raw.practiceDrills),
+    nextPractice: Array.isArray(raw.nextPractice)
+      ? raw.nextPractice.slice(0, 4).map((item) => sanitizeInput(item).slice(0, 180))
+      : [
+          "Turn every claim into a metric, customer quote, or experiment.",
+          "Make the investment ask map to one measurable milestone.",
+          "Prepare sharper competition, moat, and risk answers.",
+        ],
+  };
+}
+
+async function judgeDuel({ prompt, brief, nemotron, deepseek }) {
+  const raw = await callJson({
+    role: modelConfig.judge,
+    temperature: 0.42,
+    maxTokens: 3600,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are the investor judge. Score two founders pitching the same business. Be fair, specific, and concise. Return JSON only.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Judge this model-founder duel.",
+              "Each score is 0-100. Choose one per-round winner: nemotron, deepseek, or tie.",
+              "Choose one final winner: nemotron, deepseek, or tie.",
+              "Penalize invented facts, vague answers, weak unit economics, and unclear customer focus.",
+              "",
+              "Return JSON with this shape:",
+              JSON.stringify({
+                rounds: brief.questions.map((round) => ({
+                  id: round.id,
+                  nemotronScore: 0,
+                  deepseekScore: 0,
+                  winner: "nemotron",
+                  judgeComment: "why the winner won this round",
+                })),
+                totals: {
+                  nemotron: 0,
+                  deepseek: 0,
+                },
+                winner: "nemotron",
+                verdict: "final investor verdict",
+                strongestMoment: "best answer or phrase",
+                weakestMoment: "biggest fix",
+                nextPractice: ["practice item"],
+              }),
+              "",
+              `Original business prompt:\n${prompt}`,
+              "",
+              `Investor brief:\n${JSON.stringify(brief)}`,
+              "",
+              `${modelConfig.nemotron.label}:\n${JSON.stringify(nemotron)}`,
+              "",
+              `DeepSeek Founder:\n${JSON.stringify(deepseek)}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  const judgedRounds = Array.isArray(raw.rounds) ? raw.rounds : [];
+  const rounds = brief.questions.map((question, index) => {
+    const judgeRound = judgedRounds.find((item) => item?.id === question.id) || judgedRounds[index] || {};
+    const nemotronScore = isWeakPitchText(nemotron.answers[index]?.answer)
+      ? 15
+      : toScore(judgeRound.nemotronScore, 65);
+    const deepseekScore = isWeakPitchText(deepseek.answers[index]?.answer)
+      ? 15
+      : toScore(judgeRound.deepseekScore, 65);
+    const winner =
+      ["nemotron", "deepseek", "tie"].includes(judgeRound.winner)
+        ? judgeRound.winner
+        : nemotronScore === deepseekScore
+          ? "tie"
+          : nemotronScore > deepseekScore
+            ? "nemotron"
+            : "deepseek";
+
+    return {
+      ...question,
+      nemotron: nemotron.answers[index],
+      deepseek: deepseek.answers[index],
+      scores: {
+        nemotron: nemotronScore,
+        deepseek: deepseekScore,
+      },
+      winner,
+      judgeComment: sanitizeInput(
+        judgeRound.judgeComment,
+        winner === "tie"
+          ? "Both founders made a credible but incomplete case."
+          : `${winner === "nemotron" ? modelConfig.nemotron.label.replace(" Founder", "") : "DeepSeek"} gave the more investor-ready answer.`,
+      ).slice(0, 340),
+    };
+  });
+
+  const computedTotals = rounds.reduce(
+    (totals, round) => ({
+      nemotron: totals.nemotron + round.scores.nemotron,
+      deepseek: totals.deepseek + round.scores.deepseek,
+    }),
+    { nemotron: 0, deepseek: 0 },
+  );
+
+  const totals = {
+    nemotron: Math.round(computedTotals.nemotron / rounds.length),
+    deepseek: Math.round(computedTotals.deepseek / rounds.length),
+  };
+
+  const winner =
+    ["nemotron", "deepseek", "tie"].includes(raw.winner)
+      ? raw.winner
+      : totals.nemotron === totals.deepseek
+        ? "tie"
+        : totals.nemotron > totals.deepseek
+          ? "nemotron"
+          : "deepseek";
+
+  return {
+    rounds,
+    totals,
+    winner,
+    verdict: sanitizeInput(raw.verdict, "The winner made the clearer case, but both need stronger proof before a real check.").slice(0, 320),
+    strongestMoment: sanitizeInput(raw.strongestMoment, "The best answer tied the business to a specific customer pain.").slice(0, 260),
+    weakestMoment: sanitizeInput(raw.weakestMoment, "The weakest moment was missing proof or unit economics.").slice(0, 260),
+    nextPractice: Array.isArray(raw.nextPractice)
+      ? raw.nextPractice.slice(0, 4).map((item) => sanitizeInput(item).slice(0, 180))
+      : [
+          "Turn every claim into a metric, customer quote, or experiment.",
+          "Prepare a sharper answer for competition and moat.",
+          "Make the investment ask map to one measurable milestone.",
+        ],
+  };
+}
+
+async function createFinalNegotiation({ prompt, practiceContext, brief, nemotron, deepseek, judgement }) {
+  const raw = await callJson({
+    role: modelConfig.judge,
+    temperature: 0.32,
+    maxTokens: 1200,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are the final investor judge. You have heard both founders. Now negotiate, decide whether to invest, and write final terms. Return JSON only.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Create the final negotiation scene after all questions are complete.",
+              "Negotiate with both founders, but favor whoever made the stronger case.",
+              "If the business is investable, make a realistic conditional offer. If not, say no deal and explain what must change.",
+              "Do not invent new business facts. Base the decision on the duel transcript.",
+              "Use the founder stage and practice objective when deciding what would be realistic.",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "",
+              "Return JSON with this shape:",
+              JSON.stringify({
+                decision: "Deal, Conditional deal, or No deal",
+                offer: "investment terms or no-deal terms",
+                negotiationSummary: "short description of how the judge negotiated with both founders",
+                reason: "why this final decision was made",
+                winnerAdvice: "what the winning founder should do next",
+                loserAdvice: "what the losing founder should fix",
+              }),
+              "",
+              `Original business prompt:\n${prompt}`,
+              "",
+              `Investor brief:\n${JSON.stringify(brief)}`,
+              "",
+              `${modelConfig.nemotron.label} opening: ${nemotron.openingPosition}`,
+              "",
+              `DeepSeek Founder opening: ${deepseek.openingPosition}`,
+              "",
+              `Round judgement:\n${JSON.stringify(judgement)}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  return {
+    decision: sanitizeInput(raw.decision, "Conditional deal").slice(0, 80),
+    offer: sanitizeInput(raw.offer, "Conditional offer pending stronger proof and clean unit economics.").slice(0, 260),
+    negotiationSummary: sanitizeInput(
+      raw.negotiationSummary,
+      "The investor pressed both founders on proof, risk, and use of funds before choosing the more credible operator.",
+    ).slice(0, 520),
+    reason: sanitizeInput(raw.reason, "The final decision followed the stronger pitch, clearer numbers, and lower execution risk.").slice(0, 520),
+    winnerAdvice: sanitizeInput(raw.winnerAdvice, "Turn the winning pitch into a measurable operating plan.").slice(0, 260),
+    loserAdvice: sanitizeInput(raw.loserAdvice, "Replace generic answers with concrete evidence and a sharper deal case.").slice(0, 260),
+  };
+}
+
