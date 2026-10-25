@@ -2656,3 +2656,647 @@ async function createFinalNegotiation({ prompt, practiceContext, brief, nemotron
   };
 }
 
+async function runPitchDuelSimulation({ prompt, practiceContext = normalizePracticeContext(), cacheKey, emit }) {
+  await emit({ type: "status", status: "Mastra workflow started. Judge is extracting business facts and questions..." });
+  const brief = await withChunkCache({
+    prompt,
+    practiceContext,
+    step: "investor-brief",
+    producer: () => createInvestorBrief({ prompt, practiceContext }),
+  });
+  await emit({
+    type: "brief",
+    status: "Investor questions are ready.",
+    data: buildSimulationData({ prompt, practiceContext, brief, currentRoundIndex: 0 }),
+  });
+
+  const nemotron = { openingPosition: "", answers: [] };
+  const deepseek = { openingPosition: "", answers: [] };
+  const judgedRounds = [];
+
+  for (const [index, round] of brief.questions.entries()) {
+    await emit({
+      type: "status",
+      status: `Round ${index + 1}: both founder agents are answering in parallel...`,
+    });
+
+    const [nemotronRound, deepseekRound] = await Promise.all([
+      withChunkCache({
+        prompt,
+        practiceContext,
+        step: `founder-nemotron-round-${index + 1}`,
+        extra: JSON.stringify(round),
+        producer: () =>
+          createFounderRoundAnswer({ founder: "nemotron", prompt, practiceContext, brief, round, index }),
+      }),
+      withChunkCache({
+        prompt,
+        practiceContext,
+        step: `founder-deepseek-round-${index + 1}`,
+        extra: JSON.stringify(round),
+        producer: () =>
+          createFounderRoundAnswer({ founder: "deepseek", prompt, practiceContext, brief, round, index }),
+      }),
+    ]);
+
+    if (index === 0) {
+      nemotron.openingPosition = nemotronRound.openingPosition || nemotronRound.answer.slice(0, 220);
+      deepseek.openingPosition = deepseekRound.openingPosition || deepseekRound.answer.slice(0, 220);
+    }
+    nemotron.answers[index] = {
+      id: round.id,
+      answer: nemotronRound.answer,
+      boldMove: nemotronRound.boldMove,
+    };
+    deepseek.answers[index] = {
+      id: round.id,
+      answer: deepseekRound.answer,
+      boldMove: deepseekRound.boldMove,
+    };
+    await emit({
+      type: "founder",
+      status: `Round ${index + 1}: both answers are on screen.`,
+      data: buildSimulationData({ prompt, practiceContext, brief, nemotron, deepseek, currentRoundIndex: index }),
+    });
+
+    await emit({
+      type: "status",
+      status: `Round ${index + 1}: investor judge is scoring...`,
+    });
+    const judgedRound = await withChunkCache({
+      prompt,
+      practiceContext,
+      step: `judge-round-${index + 1}`,
+      extra: JSON.stringify({ round, nemotron: nemotron.answers[index], deepseek: deepseek.answers[index] }),
+      producer: () =>
+        judgeSingleRound({
+          prompt,
+          practiceContext,
+          brief,
+          round,
+          nemotronAnswer: nemotron.answers[index],
+          deepseekAnswer: deepseek.answers[index],
+        }),
+    });
+    judgedRounds[index] = judgedRound;
+
+    const runningTotals = judgedRounds.reduce(
+      (totals, item) => ({
+        nemotron: totals.nemotron + item.scores.nemotron,
+        deepseek: totals.deepseek + item.scores.deepseek,
+      }),
+      { nemotron: 0, deepseek: 0 },
+    );
+    const completedRounds = judgedRounds.length;
+    const runningJudgement = {
+      rounds: brief.questions.map((question, roundIndex) => judgedRounds[roundIndex] || {
+        ...question,
+        nemotron: nemotron.answers[roundIndex] || null,
+        deepseek: deepseek.answers[roundIndex] || null,
+        scores: null,
+        winner: null,
+        judgeComment: "",
+      }),
+      totals: {
+        nemotron: Math.round(runningTotals.nemotron / completedRounds),
+        deepseek: Math.round(runningTotals.deepseek / completedRounds),
+      },
+      winner: null,
+      verdict: "",
+      strongestMoment: "",
+      weakestMoment: "",
+      nextPractice: [],
+    };
+
+    await emit({
+      type: "judgement",
+      status: `Round ${index + 1} scored.`,
+      data: buildSimulationData({
+        prompt,
+        practiceContext,
+        brief,
+        nemotron,
+        deepseek,
+        judgement: runningJudgement,
+        currentRoundIndex: index,
+      }),
+    });
+  }
+
+  const computedTotals = judgedRounds.reduce(
+    (totals, round) => ({
+      nemotron: totals.nemotron + round.scores.nemotron,
+      deepseek: totals.deepseek + round.scores.deepseek,
+    }),
+    { nemotron: 0, deepseek: 0 },
+  );
+  const totals = {
+    nemotron: Math.round(computedTotals.nemotron / judgedRounds.length),
+    deepseek: Math.round(computedTotals.deepseek / judgedRounds.length),
+  };
+  const winner =
+    totals.nemotron === totals.deepseek
+      ? "tie"
+      : totals.nemotron > totals.deepseek
+        ? "nemotron"
+        : "deepseek";
+
+  await emit({ type: "status", status: "Investor judge is writing the final review..." });
+  const judgement = await withChunkCache({
+    prompt,
+    practiceContext,
+    step: "final-review",
+    extra: JSON.stringify({ judgedRounds, totals, winner }),
+    producer: () => createFinalReview({ prompt, practiceContext, brief, rounds: judgedRounds, totals, winner }),
+  });
+  await emit({
+    type: "judgement",
+    status: "Final review is ready. Preparing report...",
+    data: buildSimulationData({
+      prompt,
+      practiceContext,
+      brief,
+      nemotron,
+      deepseek,
+      judgement,
+      currentRoundIndex: Math.max(0, brief.questions.length - 1),
+    }),
+  });
+
+  await emit({ type: "status", status: "Investor judge is negotiating final terms..." });
+  const negotiation = await withChunkCache({
+    prompt,
+    practiceContext,
+    step: "final-negotiation",
+    extra: JSON.stringify(judgement),
+    producer: () => createFinalNegotiation({ prompt, practiceContext, brief, nemotron, deepseek, judgement }),
+  });
+  const reportData = buildSimulationData({ prompt, practiceContext, brief, nemotron, deepseek, judgement, negotiation });
+  const report = saveReport(reportData, cacheKey);
+  const finalData = {
+    ...reportData,
+    reportId: report.id,
+    reportUrl: `/reports/${report.id}`,
+    generatedAt: report.createdAt,
+  };
+
+  await emit({
+    type: "done",
+    status: "Report saved. You can open it from the top button.",
+    cached: false,
+    data: finalData,
+  });
+
+  return finalData;
+}
+
+function isPlaceholderBrief(brief) {
+  return (
+    isPlaceholderText(brief.businessTitle) ||
+    isPlaceholderText(brief.promptSummary) ||
+    !brief.facts?.length ||
+    brief.facts.some(isPlaceholderText) ||
+    !brief.rounds?.length ||
+    brief.rounds.some((round) => isPlaceholderText(round.focus) || isPlaceholderText(round.panelQuestion))
+  );
+}
+
+function normalizeRoomBrief(raw = {}, prompt) {
+  return {
+    businessTitle: sanitizeInput(raw.businessTitle, "Founder Shark Room").slice(0, 80),
+    promptSummary: sanitizeInput(raw.promptSummary, prompt).slice(0, 260),
+    facts: Array.isArray(raw.facts)
+      ? raw.facts.slice(0, 10).map((fact) => sanitizeInput(fact).slice(0, 180))
+      : [],
+    promptDiagnostics: normalizePromptDiagnostics(raw.promptDiagnostics),
+    rounds: [],
+  };
+}
+
+function deriveBriefFromPrompt(prompt, practiceContext) {
+  const cleanPrompt = sanitizeInput(prompt).slice(0, 1000);
+  const titleMatch =
+    cleanPrompt.match(/\b(?:I run|I am building|we run|we are building|we built|my company is|our company is)\s+([^,.:\n]+)/i) ||
+    cleanPrompt.match(/\b([A-Z][A-Za-z0-9 -]{2,40}),\s+(?:an?|the)\b/);
+  const businessTitle = sanitizeInput(titleMatch?.[1], "Founder Shark Room").slice(0, 80);
+  const sentences = cleanPrompt
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((item) => sanitizeInput(item))
+    .filter(Boolean);
+  const facts = sentences
+    .flatMap((sentence) => sentence.split(/,\s+(?=(?:and\s+)?(?:we|have|at|with|\$|\d))/i))
+    .map((item) => sanitizeInput(item))
+    .filter((item) => /\d|\$|%|revenue|margin|client|customer|clinic|pilot|raising|ask|mrr|churn/i.test(item))
+    .slice(0, 10);
+
+  return {
+    businessTitle,
+    promptSummary: sentences[0] || cleanPrompt,
+    facts: facts.length ? facts : [cleanPrompt.slice(0, 180)],
+    promptDiagnostics: normalizePromptDiagnostics({
+      stageFit: `${practiceContext.stageLabel} is usable because the prompt includes concrete founder context.`,
+      missingFacts: ["CAC or acquisition channel proof", "valuation or equity flexibility", "team ownership and operating capacity"],
+      strongestSignal: facts[0] || "The founder included concrete traction details.",
+      firstPracticeMove: "Tie the ask to one measurable milestone and one risk-control metric.",
+    }),
+    rounds: [],
+  };
+}
+
+async function repairSharkRoomBrief({ prompt, practiceContext, rawOutput }) {
+  const text = await callText({
+    role: modelConfig.deepseek,
+    temperature: 0.1,
+    maxTokens: 1100,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Extract a real founder brief. Return only the requested labels. Use the founder's actual prompt, not schema examples or placeholders.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "The user is the founder. Extract concrete facts from the founder prompt.",
+              "If numbers are present, preserve them exactly.",
+              "Respond using exactly these labels:",
+              "BUSINESS TITLE:",
+              "PROMPT SUMMARY:",
+              "FACTS:",
+              "STAGE FIT:",
+              "MISSING FACTS:",
+              "STRONGEST SIGNAL:",
+              "FIRST PRACTICE MOVE:",
+              "",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "",
+              `Founder prompt:\n${prompt}`,
+              "",
+              `Malformed previous brief:\n${JSON.stringify(rawOutput)}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  return normalizeRoomBrief(
+    {
+      businessTitle: extractLabeledValue(text, ["BUSINESS TITLE"]),
+      promptSummary: extractLabeledValue(text, ["PROMPT SUMMARY"]),
+      facts: parseListValue(extractLabeledValue(text, ["FACTS"])),
+      promptDiagnostics: {
+        stageFit: extractLabeledValue(text, ["STAGE FIT"]),
+        missingFacts: parseListValue(extractLabeledValue(text, ["MISSING FACTS"])),
+        strongestSignal: extractLabeledValue(text, ["STRONGEST SIGNAL"]),
+        firstPracticeMove: extractLabeledValue(text, ["FIRST PRACTICE MOVE"]),
+      },
+    },
+    prompt,
+  );
+}
+
+function parseSharkQuestionText(text, sharkKey, count) {
+  return Array.from({ length: count }, (_, index) => {
+    const number = index + 1;
+    return {
+      focus: extractLabeledValue(text, [`FOCUS ${number}`]),
+      question: extractLabeledValue(text, [`QUESTION ${number}`]),
+      angle: extractLabeledValue(text, [`ANGLE ${number}`]),
+    };
+  }).map((question) => ({
+    askingShark: sharkKey,
+    askingSharkLabel: sharkLabel(sharkKey),
+    focus: sanitizeInput(question.focus).slice(0, 100),
+    question: sanitizeInput(question.question).slice(0, 520),
+    angle: sanitizeInput(question.angle).slice(0, 180),
+  }));
+}
+
+function normalizeRawSharkQuestionArray(rawQuestions = [], sharkKey, count) {
+  const source = Array.isArray(rawQuestions) ? rawQuestions : [];
+  return source.slice(0, count).map((item = {}) => ({
+    askingShark: sharkKey,
+    askingSharkLabel: sharkLabel(sharkKey),
+    focus: sanitizeInput(item.focus).slice(0, 100),
+    question: sanitizeInput(item.question || item.panelQuestion).slice(0, 520),
+    angle: sanitizeInput(item.angle).slice(0, 180),
+  }));
+}
+
+function isMalformedGeneratedQuestion(question = {}) {
+  const values = [question.focus, question.question, question.angle].map((value) => sanitizeInput(value).toLowerCase());
+  return values.some(
+    (value) =>
+      !value ||
+      value.includes("so i need") ||
+      value.includes("i need to output") ||
+      value.includes("output three lines") ||
+      value.includes("respond using") ||
+      value.includes("exactly these labels") ||
+      value.includes("final answer only") ||
+      value.includes("do not include") ||
+      /^angle\s+\d+\s*:?\s*$/i.test(value) ||
+      /^focus\s+\d+\s*:?\s*$/i.test(value) ||
+      /^question\s+\d+\s*:?\s*$/i.test(value),
+  );
+}
+
+function isInvalidSharkQuestionSet(questions = [], count) {
+  return (
+    questions.length < count ||
+    questions.some(
+      (question) =>
+        isPlaceholderText(question.focus) ||
+        isPlaceholderText(question.question) ||
+        isPlaceholderText(question.angle) ||
+        sanitizeInput(question.question).length < 35 ||
+        isMalformedGeneratedQuestion(question),
+    )
+  );
+}
+
+function deriveSharkQuestionSetFromPrompt({ sharkKey, overview, practiceContext, count }) {
+  const facts = (overview.facts || []).filter(Boolean).slice(0, 4).join("; ");
+  const context = facts || overview.promptSummary || "the founder's current traction";
+  const templates = {
+    nemotron: [
+      {
+        focus: "Operating proof",
+        question: `Given ${context}, what operating milestone will prove you can scale without quality, margin, or retention breaking?`,
+        angle: "Tests delivery systems, hiring discipline, throughput, margin, and retention.",
+      },
+      {
+        focus: "Execution plan",
+        question: `What will you personally own over the next 90 days, and which weekly metric tells me execution is working?`,
+        angle: "Tests founder ownership, operating cadence, and measurable execution.",
+      },
+    ],
+    deepseek: [
+      {
+        focus: "Growth wedge",
+        question: `Given ${context}, what specific acquisition wedge gets the next customers repeatably instead of through founder hustle?`,
+        angle: "Tests distribution, category wedge, channel repeatability, and market pull.",
+      },
+      {
+        focus: "Scale loop",
+        question: `What partnership, product loop, or data advantage makes this business scale faster after the next milestone?`,
+        angle: "Tests growth loops, partnerships, defensibility, and expansion logic.",
+      },
+    ],
+    judge: [
+      {
+        focus: "Deal logic",
+        question: `Why is this ask the right amount, what milestone does it unlock, and what makes the terms fair for investors?`,
+        angle: "Tests valuation, use of funds, risk, return, and deal discipline.",
+      },
+      {
+        focus: "Risk and return",
+        question: `What is the biggest reason I should pass today, and what proof would change that decision?`,
+        angle: "Tests downside risk, missing proof, diligence, and conditions for investment.",
+      },
+    ],
+  };
+  const source = templates[sharkKey] || templates.judge;
+  return source.slice(0, count).map((item) => ({
+    askingShark: sharkKey,
+    askingSharkLabel: sharkLabel(sharkKey),
+    focus: `${practiceContext.objectiveLabel}: ${item.focus}`.slice(0, 100),
+    question: item.question.slice(0, 520),
+    angle: item.angle.slice(0, 180),
+  }));
+}
+
+async function repairSharkQuestionSetJson({ sharkKey, prompt, practiceContext, overview, rawOutput, count }) {
+  const raw = await callJson({
+    role: modelConfig.deepseek,
+    temperature: 0.08,
+    maxTokens: 1400,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Create clean Shark Tank investor questions as strict JSON. Return only JSON. Do not include analysis, labels, markdown, placeholders, or copied instructions.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              `Write exactly ${count} question${count === 1 ? "" : "s"} for ${sharkLabel(sharkKey)}.`,
+              sharkProfiles()[sharkKey].thesis,
+              "Each question must be one direct investor question to the human founder.",
+              "Use the founder's stated facts. Do not invent revenue, margins, customers, team, valuation, or traction.",
+              "Return JSON in this shape only:",
+              JSON.stringify({
+                questions: [
+                  {
+                    focus: "short focus",
+                    question: "one direct investor question",
+                    angle: "what this shark is testing",
+                  },
+                ],
+              }),
+              "",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "",
+              `Business overview:\n${JSON.stringify({
+                businessTitle: overview.businessTitle,
+                promptSummary: overview.promptSummary,
+                facts: overview.facts,
+                promptDiagnostics: overview.promptDiagnostics,
+              })}`,
+              "",
+              `Founder prompt:\n${prompt}`,
+              "",
+              `Malformed previous output:\n${rawOutput}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  return normalizeRawSharkQuestionArray(raw.questions, sharkKey, count);
+}
+
+async function repairSharkReaction({ sharkKey, prompt, room, round, answer, rawOutput }) {
+  const text = await callText({
+    role: modelConfig.deepseek,
+    temperature: 0.16,
+    maxTokens: 1100,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Rewrite malformed shark reaction output into a final investor response. Use the raw model output and room context, but do not copy placeholders, instructions, schema text, draft notes, or thinking text. Do not use JSON.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Respond using exactly these labels:",
+              "REACTION:",
+              "SCORE:",
+              "INTEREST:",
+              "PRESSURE:",
+              "DEAL SIGNAL:",
+              "INVESTOR NOTE:",
+              "",
+              `Write as ${sharkLabel(sharkKey)}.`,
+              sharkProfiles()[sharkKey].thesis,
+              "Score and interest must be integers from 0 to 100.",
+              "Use the founder's actual answer and business facts. Do not invent missing numbers.",
+              "",
+              `Raw model output:\n${typeof rawOutput === "string" ? rawOutput : JSON.stringify(rawOutput)}`,
+              "",
+              `Business prompt:\n${prompt}`,
+              `Facts:\n${room.facts.map((fact) => `- ${fact}`).join("\n")}`,
+              `Current focus: ${round.focus}`,
+              `Asking shark: ${round.askingSharkLabel || "Shark panel"}`,
+              `Question: ${round.panelQuestion}`,
+              `Founder answer:\n${answer}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  return normalizeSharkReaction(
+    {
+      reaction: extractLabeledValue(text, ["REACTION"]),
+      score: extractLabeledValue(text, ["SCORE"], "0"),
+      interest: extractLabeledValue(text, ["INTEREST"], "0"),
+      pressure: extractLabeledValue(text, ["PRESSURE"]),
+      dealSignal: extractLabeledValue(text, ["DEAL SIGNAL", "DEAL_SIGNAL"]),
+      investorNote: extractLabeledValue(text, ["INVESTOR NOTE", "INVESTOR_NOTE"]),
+    },
+    sharkKey,
+  );
+}
+
+async function createSharkQuestionSet({ sharkKey, prompt, practiceContext, overview, strict = false }) {
+  const count = practiceContext.questionsPerShark || 1;
+  const text = await callText({
+    role: modelConfig[sharkKey],
+    temperature: strict ? 0.14 : 0.32,
+    maxTokens: sharkKey === "judge" ? 1800 : 1300,
+    messages: [
+      {
+        role: "system",
+        content: [
+          `You are ${sharkLabel(sharkKey)} preparing your own Shark Tank questions for the human founder.`,
+          sharkProfiles()[sharkKey].thesis,
+          "You are one of three investor sharks. Do not write questions for the other sharks.",
+          "Final answer only. Do not include analysis, a thinking process, markdown, JSON, examples, or ellipses.",
+          strict ? "This is a retry. Fill every requested label with specific questions grounded in the founder's facts." : "",
+        ].filter(Boolean).join(" "),
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              `Write exactly ${count} starting question${count === 1 ? "" : "s"} from your shark perspective.`,
+              "Each question must be answerable by the founder in one response.",
+              "Use the founder's actual facts and numbers if present. Do not invent missing revenue, margins, customers, or team facts.",
+              "Avoid repeating the other sharks' likely angles.",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "",
+              `Business overview:\n${JSON.stringify({
+                businessTitle: overview.businessTitle,
+                promptSummary: overview.promptSummary,
+                facts: overview.facts,
+                promptDiagnostics: overview.promptDiagnostics,
+              })}`,
+              "",
+              `Founder prompt:\n${prompt}`,
+              "",
+              "Respond using exactly these labels:",
+              ...Array.from({ length: count }, (_, index) => {
+                const number = index + 1;
+                return [`FOCUS ${number}:`, `QUESTION ${number}:`, `ANGLE ${number}:`].join("\n");
+              }),
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  const questions = parseSharkQuestionText(text, sharkKey, count);
+  if (isInvalidSharkQuestionSet(questions, count)) {
+    if (!strict) {
+      return createSharkQuestionSet({ sharkKey, prompt, practiceContext, overview, strict: true });
+    }
+    const repairedText = await callText({
+      role: modelConfig.deepseek,
+      temperature: 0.16,
+      maxTokens: 1200,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Rewrite malformed shark question output into final labeled questions. Use the raw model output and room context, but do not copy placeholders, instructions, draft notes, or thinking text. Do not use JSON.",
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: [
+                `Write exactly ${count} question${count === 1 ? "" : "s"} as ${sharkLabel(sharkKey)}.`,
+                sharkProfiles()[sharkKey].thesis,
+                "Use the founder's actual facts. Do not invent missing numbers.",
+                "",
+                "Respond using exactly these labels:",
+                ...Array.from({ length: count }, (_, index) => {
+                  const number = index + 1;
+                  return [`FOCUS ${number}:`, `QUESTION ${number}:`, `ANGLE ${number}:`].join("\n");
+                }),
+                "",
+                `Raw model output:\n${text}`,
+                "",
+                `Business overview:\n${JSON.stringify({
+                  businessTitle: overview.businessTitle,
+                  promptSummary: overview.promptSummary,
+                  facts: overview.facts,
+                  promptDiagnostics: overview.promptDiagnostics,
+                })}`,
+                "",
+                `Founder prompt:\n${prompt}`,
+              ].join("\n"),
+            },
+          ],
+        },
+      ],
+    });
+    const repairedQuestions = parseSharkQuestionText(repairedText, sharkKey, count);
+    if (!isInvalidSharkQuestionSet(repairedQuestions, count)) {
+      return repairedQuestions;
+    }
+    const jsonRepairedQuestions = await repairSharkQuestionSetJson({
+      sharkKey,
+      prompt,
+      practiceContext,
+      overview,
+      rawOutput: `${text}\n\n${repairedText}`,
+      count,
+    });
+    if (!isInvalidSharkQuestionSet(jsonRepairedQuestions, count)) {
+      return jsonRepairedQuestions;
+    }
+    return deriveSharkQuestionSetFromPrompt({ sharkKey, overview, practiceContext, count });
+  }
+
+  return questions;
+}
+
