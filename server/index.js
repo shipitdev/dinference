@@ -3300,3 +3300,836 @@ async function createSharkQuestionSet({ sharkKey, prompt, practiceContext, overv
   return questions;
 }
 
+async function createSharkRoomBrief({ prompt, practiceContext, strict = false }) {
+  let raw;
+  try {
+    raw = await callJson({
+      role: modelConfig.deepseek,
+      temperature: strict ? 0.12 : 0.28,
+      maxTokens: 1400,
+      messages: [
+      {
+        role: "system",
+        content:
+          [
+            "You are the Shark Tank room coordinator preparing only the founder brief.",
+            "Extract real facts from the founder prompt so each investor shark can write its own questions.",
+            "Do not copy example values from the requested JSON shape.",
+            "Never return placeholders such as short title, one sentence business summary, or fact from user prompt.",
+            strict ? "This is a retry. The previous answer copied schema placeholders. Use the founder's actual business details in every field." : "",
+            "Return JSON only.",
+          ].filter(Boolean).join(" "),
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "The user is the founder. The three model agents are investors, not founders.",
+              "Extract only stated facts or clearly safe summaries. Do not invent revenue, customers, margins, team, valuation, or traction.",
+              "Every string must be a real value for this business, not an example or placeholder.",
+              "Do not create investor questions. Only create the brief fields.",
+              "If the prompt includes numbers such as revenue, margin, clients, ask amount, or team details, include those exact numbers in the facts.",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "",
+              "Return only a valid JSON object with these keys:",
+              "- businessTitle: a short name for the actual business.",
+              "- promptSummary: one sentence summarizing the actual business.",
+              "- facts: an array of concrete facts from the founder prompt.",
+              "- promptDiagnostics.stageFit: whether the selected stage fits the facts.",
+              "- promptDiagnostics.missingFacts: an array of specific missing investor facts.",
+              "- promptDiagnostics.strongestSignal: the strongest concrete proof in the prompt.",
+              "- promptDiagnostics.firstPracticeMove: the first answer the founder should tighten.",
+              "",
+              `Founder prompt:\n${prompt}`,
+            ].join("\n"),
+          },
+        ],
+      },
+      ],
+    });
+  } catch (error) {
+    raw = await repairSharkRoomBrief({
+      prompt,
+      practiceContext,
+      rawOutput: error instanceof Error ? error.message : "The model returned malformed JSON.",
+    });
+  }
+
+  let overview = normalizeRoomBrief(raw, prompt);
+
+  if (
+    isPlaceholderText(overview.businessTitle) ||
+    isPlaceholderText(overview.promptSummary) ||
+    !overview.facts?.length ||
+    overview.facts.some(isPlaceholderText)
+  ) {
+    if (!strict) {
+      return createSharkRoomBrief({ prompt, practiceContext, strict: true });
+    }
+    overview = await repairSharkRoomBrief({ prompt, practiceContext, rawOutput: raw });
+    if (
+      isPlaceholderText(overview.businessTitle) ||
+      isPlaceholderText(overview.promptSummary) ||
+      !overview.facts?.length ||
+      overview.facts.some(isPlaceholderText)
+    ) {
+      overview = deriveBriefFromPrompt(prompt, practiceContext);
+    }
+  }
+
+  const questionPairs = await Promise.all(
+    sharkKeys.map(async (sharkKey) => [
+      sharkKey,
+      await createSharkQuestionSet({ sharkKey, prompt, practiceContext, overview }),
+    ]),
+  );
+  const questionSets = Object.fromEntries(questionPairs);
+  const rounds = normalizeRoomRoundsFromSharkQuestions(questionSets, practiceContext);
+  const brief = { ...overview, rounds };
+
+  if (isPlaceholderBrief(brief)) {
+    throw new Error("One or more sharks returned placeholder starting questions. Try again with more concrete business details.");
+  }
+
+  return brief;
+}
+
+async function createSharkReaction({ sharkKey, prompt, practiceContext, room, round, answer, strict = false }) {
+  if (sharkKey === "judge") {
+    const text = await callText({
+      role: modelConfig.judge,
+      temperature: strict ? 0.12 : 0.24,
+      maxTokens: 1800,
+      messages: [
+        {
+          role: "system",
+          content: [
+            `You are ${sharkLabel(sharkKey)} in an interactive AI Shark Tank room.`,
+            sharkProfiles()[sharkKey].thesis,
+            "Evaluate the human founder's live answer as a financial skeptic.",
+            "Final answer only. Do not include analysis, a thinking process, a checklist, draft notes, JSON, markdown, or ellipses.",
+            "Write concrete, specific investor language under each requested label.",
+            strict ? "This is a retry because the previous answer was not usable. Fill every label with real content." : "",
+          ].filter(Boolean).join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: [
+                "Respond using exactly these labels:",
+                "REACTION:",
+                "SCORE:",
+                "INTEREST:",
+                "PRESSURE:",
+                "DEAL SIGNAL:",
+                "INVESTOR NOTE:",
+                "",
+                `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+                "",
+                `Business prompt:\n${prompt}`,
+                "",
+                `Room facts:\n${room.facts.map((fact) => `- ${fact}`).join("\n")}`,
+                "",
+                `Current focus: ${round.focus}`,
+                `Panel question: ${round.panelQuestion}`,
+                `Your angle: ${round.sharkAngles?.[sharkKey] || sharkProfiles()[sharkKey].thesis}`,
+                "",
+                `Founder answer:\n${answer}`,
+              ].join("\n"),
+            },
+          ],
+        },
+      ],
+    });
+    const reaction = normalizeSharkReaction(
+      {
+        reaction: extractLabeledValue(text, ["REACTION"]),
+        score: extractLabeledValue(text, ["SCORE"], "0"),
+        interest: extractLabeledValue(text, ["INTEREST"], "0"),
+        pressure: extractLabeledValue(text, ["PRESSURE"]),
+        dealSignal: extractLabeledValue(text, ["DEAL SIGNAL", "DEAL_SIGNAL"]),
+        investorNote: extractLabeledValue(text, ["INVESTOR NOTE", "INVESTOR_NOTE"]),
+      },
+      sharkKey,
+    );
+    if (isPlaceholderReaction(reaction)) {
+      if (!strict) {
+        return createSharkReaction({ sharkKey, prompt, practiceContext, room, round, answer, strict: true });
+      }
+      const repaired = await callJson({
+        role: modelConfig.deepseek,
+        temperature: 0.18,
+        maxTokens: 900,
+        messages: [
+          {
+            role: "system",
+            content:
+              "Structure a usable investor reaction for the Nemotron Lightning Shark. Use the founder answer and room context. Do not use placeholders, ellipses, or copied schema text. Return JSON only.",
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: [
+                  "Return JSON with keys: reaction, score, interest, pressure, dealSignal, investorNote.",
+                  "Write as the Nemotron Lightning Shark: lead deal-maker and financial skeptic.",
+                  "",
+                  `Raw Nemotron output:\n${text}`,
+                  "",
+                  `Business prompt:\n${prompt}`,
+                  `Facts:\n${room.facts.map((fact) => `- ${fact}`).join("\n")}`,
+                  `Panel question: ${round.panelQuestion}`,
+                  `Founder answer:\n${answer}`,
+                ].join("\n"),
+              },
+            ],
+          },
+        ],
+      });
+      const repairedReaction = normalizeSharkReaction(repaired, sharkKey);
+      if (isPlaceholderReaction(repairedReaction)) {
+        throw new Error(`${sharkLabel(sharkKey)} returned placeholder reaction text.`);
+      }
+      return repairedReaction;
+    }
+    return reaction;
+  }
+
+  let raw;
+  try {
+    raw = await callJson({
+      role: modelConfig[sharkKey],
+      temperature: strict ? 0.12 : sharkKey === "judge" ? 0.22 : 0.48,
+      maxTokens: 1100,
+      messages: [
+      {
+        role: "system",
+        content: [
+          `You are ${sharkLabel(sharkKey)} in an interactive AI Shark Tank room.`,
+          sharkProfiles()[sharkKey].thesis,
+          "You are evaluating the human founder's live answer, not pitching as a founder.",
+          "Score harshly but practically from 0-100. Interest is your current likelihood of investing from 0-100.",
+          "Do not invent facts. If proof is missing, call it out.",
+          "Never output ellipses, placeholder text, or empty fields. Every field must contain actual investor language.",
+          strict ? "This is a retry because the previous reaction was empty or placeholder text. Give specific investor feedback using the founder's actual answer." : "",
+          "Return JSON only.",
+        ].filter(Boolean).join(" "),
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "React to the founder's answer for this round.",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "",
+              "Return only a valid JSON object with these keys:",
+              "- reaction: a concise, specific investor reaction to this answer.",
+              "- score: an integer from 0 to 100.",
+              "- interest: an integer from 0 to 100 showing your current likelihood of investing.",
+              "- pressure: one specific follow-up pressure point.",
+              "- dealSignal: how this answer changes your willingness to invest.",
+              "- investorNote: one practical note to help the founder improve.",
+              "",
+              `Business prompt:\n${prompt}`,
+              "",
+              `Room facts:\n${room.facts.map((fact) => `- ${fact}`).join("\n")}`,
+              "",
+              `Previous answered rounds:\n${JSON.stringify((room.rounds || []).filter((item) => item.userAnswer).map((item) => ({
+                focus: item.focus,
+                panelQuestion: item.panelQuestion,
+                userAnswer: item.userAnswer,
+                scores: item.scores,
+                interest: item.interest,
+              })))}`,
+              "",
+              `Current focus: ${round.focus}`,
+              `Panel question: ${round.panelQuestion}`,
+              `Your angle: ${round.sharkAngles?.[sharkKey] || sharkProfiles()[sharkKey].thesis}`,
+              "",
+              `Founder answer:\n${answer}`,
+            ].join("\n"),
+          },
+        ],
+      },
+      ],
+    });
+  } catch (error) {
+    const repairedReaction = await repairSharkReaction({
+      sharkKey,
+      prompt,
+      room,
+      round,
+      answer,
+      rawOutput: error instanceof Error ? error.message : "The model returned malformed JSON.",
+    });
+    if (isPlaceholderReaction(repairedReaction)) {
+      throw new Error(`${sharkLabel(sharkKey)} returned malformed reaction text.`);
+    }
+    return repairedReaction;
+  }
+
+  const reaction = normalizeSharkReaction(raw, sharkKey);
+  if (isPlaceholderReaction(reaction)) {
+    if (!strict) {
+      return createSharkReaction({ sharkKey, prompt, practiceContext, room, round, answer, strict: true });
+    }
+    const repairedReaction = await repairSharkReaction({
+      sharkKey,
+      prompt,
+      room,
+      round,
+      answer,
+      rawOutput: raw,
+    });
+    if (isPlaceholderReaction(repairedReaction)) {
+      throw new Error(`${sharkLabel(sharkKey)} returned placeholder reaction text.`);
+    }
+    return repairedReaction;
+  }
+
+  return reaction;
+}
+
+async function repairFinalSharkOffer({ sharkKey, prompt, practiceContext, room, rawOutput }) {
+  const text = await callText({
+    role: modelConfig.deepseek,
+    temperature: 0.12,
+    maxTokens: 1100,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Write a final Shark Tank investment decision using only the requested labels. No JSON, markdown, analysis, placeholders, or copied schema text.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              `Write as ${sharkLabel(sharkKey)}.`,
+              sharkProfiles()[sharkKey].thesis,
+              "Choose exactly one decision: offer, pass, or join.",
+              "If passing, leave amount and equity blank.",
+              "Respond using exactly these labels:",
+              "DECISION:",
+              "AMOUNT:",
+              "EQUITY:",
+              "CONDITIONS:",
+              "RATIONALE:",
+              "IMPROVEMENT:",
+              "CONFIDENCE:",
+              "",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "",
+              `Business prompt:\n${prompt}`,
+              "",
+              `Room transcript:\n${JSON.stringify(room.rounds)}`,
+              "",
+              `Malformed previous output:\n${rawOutput}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+  return normalizeOffer(
+    {
+      decision: extractLabeledValue(text, ["DECISION"]),
+      amount: extractLabeledValue(text, ["AMOUNT"]),
+      equity: extractLabeledValue(text, ["EQUITY"]),
+      conditions: parseListValue(extractLabeledValue(text, ["CONDITIONS"])),
+      rationale: extractLabeledValue(text, ["RATIONALE"]),
+      improvementNote: extractLabeledValue(text, ["IMPROVEMENT"]),
+      confidence: extractLabeledValue(text, ["CONFIDENCE"], "0"),
+    },
+    sharkKey,
+  );
+}
+
+async function createFinalSharkOffer({ sharkKey, prompt, practiceContext, room }) {
+  if (sharkKey === "judge") {
+    const text = await callText({
+      role: modelConfig.judge,
+      temperature: 0.24,
+      maxTokens: 1300,
+      messages: [
+        {
+          role: "system",
+          content: [
+            `You are ${sharkLabel(sharkKey)} making your independent final Shark Tank decision.`,
+            sharkProfiles()[sharkKey].thesis,
+            "Choose offer, pass, or join. Use realistic terms and conditions.",
+            "Final answer only. Do not include analysis, a thinking process, draft notes, JSON, markdown, or ellipses. Fill every label with concrete content.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: [
+                "Respond using exactly these labels:",
+                "DECISION:",
+                "AMOUNT:",
+                "EQUITY:",
+                "CONDITIONS:",
+                "RATIONALE:",
+                "IMPROVEMENT:",
+                "CONFIDENCE:",
+                "",
+                `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+                "",
+                `Business prompt:\n${prompt}`,
+                "",
+                `Room transcript:\n${JSON.stringify(room.rounds)}`,
+              ].join("\n"),
+            },
+          ],
+        },
+      ],
+    });
+    return normalizeOffer(
+      {
+        decision: extractLabeledValue(text, ["DECISION"]),
+        amount: extractLabeledValue(text, ["AMOUNT"]),
+        equity: extractLabeledValue(text, ["EQUITY"]),
+        conditions: parseListValue(extractLabeledValue(text, ["CONDITIONS"])),
+        rationale: extractLabeledValue(text, ["RATIONALE"]),
+        improvementNote: extractLabeledValue(text, ["IMPROVEMENT"]),
+        confidence: extractLabeledValue(text, ["CONFIDENCE"], "0"),
+      },
+      sharkKey,
+    );
+  }
+
+  let raw;
+  try {
+    raw = await callJson({
+      role: modelConfig[sharkKey],
+      temperature: sharkKey === "judge" ? 0.28 : 0.42,
+      maxTokens: 1200,
+      messages: [
+      {
+        role: "system",
+        content: [
+          `You are ${sharkLabel(sharkKey)} making your independent final Shark Tank decision.`,
+          sharkProfiles()[sharkKey].thesis,
+          "Choose offer, pass, or join. A join means you would join another shark's terms instead of leading.",
+          "Use realistic terms and conditions. Do not invent new business facts.",
+          "Return JSON only.",
+        ].join(" "),
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Make your final investment decision after hearing every founder answer.",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "",
+              "Return JSON with this shape:",
+              JSON.stringify({
+                decision: "offer",
+                amount: "$150k",
+                equity: "10%",
+                conditions: ["condition"],
+                rationale: "why you made this decision",
+                improvementNote: "what founder should improve",
+                confidence: 0,
+              }),
+              "",
+              `Business prompt:\n${prompt}`,
+              "",
+              `Room transcript:\n${JSON.stringify(room.rounds)}`,
+            ].join("\n"),
+          },
+        ],
+      },
+      ],
+    });
+  } catch (error) {
+    return repairFinalSharkOffer({
+      sharkKey,
+      prompt,
+      practiceContext,
+      room,
+      rawOutput: error instanceof Error ? error.message : "The model returned malformed JSON.",
+    });
+  }
+
+  return normalizeOffer(raw, sharkKey);
+}
+
+async function createFinalDealReview({ prompt, practiceContext, room, offers }) {
+  const raw = await callJson({
+    role: modelConfig.deepseek,
+    temperature: 0.26,
+    maxTokens: 1500,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are the Shark Tank room coordinator writing the final deal memo for a founder practice room. Summarize offers, passes, risks, and drills. Return JSON only.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Summarize the final deal phase. Outcome must be Deal, Conditional deal, or No deal.",
+              "Best offer should reference one of the sharks if any offer or join exists.",
+              "Keep this useful for the human founder to practice next.",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "",
+              "Return JSON with this shape:",
+              JSON.stringify({
+                outcome: "Conditional deal",
+                bestOffer: { shark: "nemotron", label: "MiniMax Shark", terms: "$150k for 12%" },
+                verdict: "final deal verdict",
+                strongestAnswer: "best founder answer",
+                weakestAnswer: "weakest founder answer",
+                dealRisks: ["risk"],
+                nextPractice: ["practice move"],
+                practiceDrills: [
+                  {
+                    name: "drill name",
+                    goal: "what this improves",
+                    prompt: "practice question",
+                  },
+                ],
+              }),
+              "",
+              `Business prompt:\n${prompt}`,
+              "",
+              `Rounds:\n${JSON.stringify(room.rounds)}`,
+              "",
+              `Independent shark decisions:\n${JSON.stringify(offers)}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  const acceptedOffers = offers.filter((offer) => offer.decision === "offer" || offer.decision === "join");
+  const bestOffer = !acceptedOffers.length
+    ? {
+        shark: "",
+        label: "No lead shark",
+        terms: "No formal offer",
+      }
+    : raw.bestOffer && typeof raw.bestOffer === "object"
+    ? {
+        shark: sanitizeInput(raw.bestOffer.shark, acceptedOffers[0]?.shark || "").slice(0, 40),
+        label: sanitizeInput(raw.bestOffer.label, acceptedOffers[0]?.label || "No lead shark").slice(0, 80),
+        terms: sanitizeInput(
+          raw.bestOffer.terms,
+          acceptedOffers[0] ? `${acceptedOffers[0].amount} ${acceptedOffers[0].equity ? `for ${acceptedOffers[0].equity}` : ""}` : "No formal offer",
+        ).slice(0, 180),
+      }
+    : {
+        shark: acceptedOffers[0]?.shark || "",
+        label: acceptedOffers[0]?.label || "No lead shark",
+        terms: acceptedOffers[0] ? `${acceptedOffers[0].amount} ${acceptedOffers[0].equity ? `for ${acceptedOffers[0].equity}` : ""}` : "No formal offer",
+      };
+  const rawOutcome = sanitizeInput(raw.outcome, acceptedOffers.length ? "Conditional deal" : "No deal");
+  const outcome = !acceptedOffers.length
+    ? "No deal"
+    : ["Deal", "Conditional deal", "No deal"].find((item) => item.toLowerCase() === rawOutcome.toLowerCase()) ||
+      "Conditional deal";
+
+  return {
+    outcome,
+    offers,
+    bestOffer,
+    verdict: sanitizeInput(raw.verdict, "The sharks made their decision based on the founder's proof, economics, growth plan, and deal risk.").slice(0, 520),
+    strongestAnswer: sanitizeInput(raw.strongestAnswer, "The strongest answer connected a real fact to a fundable next milestone.").slice(0, 260),
+    weakestAnswer: sanitizeInput(raw.weakestAnswer, "The weakest answer needs more proof, numbers, and risk control.").slice(0, 260),
+    dealRisks: Array.isArray(raw.dealRisks)
+      ? raw.dealRisks.slice(0, 5).map((item) => sanitizeInput(item).slice(0, 180))
+      : [],
+    nextPractice: Array.isArray(raw.nextPractice)
+      ? raw.nextPractice.slice(0, 5).map((item) => sanitizeInput(item).slice(0, 180))
+      : [],
+    practiceDrills: normalizePracticeDrills(raw.practiceDrills),
+    counterOffers: [],
+  };
+}
+
+async function createCounterOfferResponse({ sharkKey, prompt, practiceContext, room, counter, strict = false }) {
+  if (sharkKey === "judge") {
+    const text = await callText({
+      role: modelConfig.judge,
+      temperature: strict ? 0.12 : 0.22,
+      maxTokens: 2200,
+      messages: [
+        {
+          role: "system",
+          content: [
+            `You are ${sharkLabel(sharkKey)} responding to the founder's counter-offer.`,
+            sharkProfiles()[sharkKey].thesis,
+            "Final answer only. Choose accept, revise, or walk. Do not include analysis, a thinking process, draft notes, JSON, markdown, or ellipses.",
+            strict ? "This is a retry. MESSAGE must directly explain your decision on the founder's revised terms. FINAL ADVICE must teach one practical negotiation lesson." : "",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: [
+                "Respond using exactly these labels:",
+                "DECISION:",
+                "REVISED AMOUNT:",
+                "REVISED EQUITY:",
+                "CONDITIONS:",
+                "MESSAGE:",
+                "FINAL ADVICE:",
+                "",
+                `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+                "",
+                `Business prompt:\n${prompt}`,
+                "",
+                `Final deal before counter:\n${JSON.stringify(room.finalDeal)}`,
+                "",
+                `Founder counter-offer:\n${counter}`,
+              ].join("\n"),
+            },
+          ],
+        },
+      ],
+    });
+    const response = normalizeCounterResponse(
+      {
+        decision: extractLabeledValue(text, ["DECISION"]),
+        revisedAmount: extractLabeledValue(text, ["REVISED AMOUNT", "REVISED_AMOUNT"]),
+        revisedEquity: extractLabeledValue(text, ["REVISED EQUITY", "REVISED_EQUITY"]),
+        conditions: parseListValue(extractLabeledValue(text, ["CONDITIONS"])),
+        message: extractLabeledValue(text, ["MESSAGE"]),
+        finalAdvice: extractLabeledValue(text, ["FINAL ADVICE", "FINAL_ADVICE"]),
+      },
+      sharkKey,
+    );
+    if (isPlaceholderCounterResponse(response)) {
+      if (!strict) {
+        return createCounterOfferResponse({ sharkKey, prompt, practiceContext, room, counter, strict: true });
+      }
+      const repairedText = await callText({
+        role: modelConfig.deepseek,
+        temperature: 0.18,
+        maxTokens: 1500,
+        messages: [
+          {
+            role: "system",
+            content:
+              "Write the final counter-offer response for the Nemotron Lightning Shark. Use the raw Nemotron output and room context, but do not copy placeholders, instructions, draft notes, or thinking text. Do not use JSON.",
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: [
+                  "Respond using exactly these labels:",
+                  "DECISION:",
+                  "REVISED AMOUNT:",
+                  "REVISED EQUITY:",
+                  "CONDITIONS:",
+                  "MESSAGE:",
+                  "FINAL ADVICE:",
+                  "",
+                  "Write as the Nemotron Lightning Shark: lead deal-maker and financial skeptic.",
+                  "decision must be accept, revise, or walk.",
+                  "",
+                  `Raw Nemotron output:\n${text}`,
+                  "",
+                  `Business prompt:\n${prompt}`,
+                  `Final deal before counter:\n${JSON.stringify(room.finalDeal)}`,
+                  `Founder counter-offer:\n${counter}`,
+                ].join("\n"),
+              },
+            ],
+          },
+        ],
+      });
+      const repairedResponse = normalizeCounterResponse(
+        {
+          decision: extractLabeledValue(repairedText, ["DECISION"]),
+          revisedAmount: extractLabeledValue(repairedText, ["REVISED AMOUNT", "REVISED_AMOUNT"]),
+          revisedEquity: extractLabeledValue(repairedText, ["REVISED EQUITY", "REVISED_EQUITY"]),
+          conditions: parseListValue(extractLabeledValue(repairedText, ["CONDITIONS"])),
+          message: extractLabeledValue(repairedText, ["MESSAGE"]),
+          finalAdvice: extractLabeledValue(repairedText, ["FINAL ADVICE", "FINAL_ADVICE"]),
+        },
+        sharkKey,
+      );
+      if (isPlaceholderCounterResponse(repairedResponse)) {
+        throw new Error(`${sharkLabel(sharkKey)} returned placeholder counter-offer text.`);
+      }
+      return repairedResponse;
+    }
+    return response;
+  }
+
+  const text = await callText({
+    role: modelConfig[sharkKey],
+    temperature: strict ? 0.12 : 0.28,
+    maxTokens: 1200,
+    messages: [
+      {
+        role: "system",
+        content: [
+          `You are ${sharkLabel(sharkKey)} responding to the founder's counter-offer.`,
+          sharkProfiles()[sharkKey].thesis,
+          "Final answer only. Choose accept, revise, or walk. Do not include analysis, a thinking process, draft notes, JSON, markdown, or ellipses.",
+          strict ? "This is a retry. Fill MESSAGE and FINAL ADVICE with specific investor language tied to the counter-offer." : "",
+        ].join(" "),
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Respond using exactly these labels:",
+              "DECISION:",
+              "REVISED AMOUNT:",
+              "REVISED EQUITY:",
+              "CONDITIONS:",
+              "MESSAGE:",
+              "FINAL ADVICE:",
+              "",
+              "If you did not previously offer, you may still revise into an offer only if the counter materially solves your objections.",
+              "",
+              `Practice context:\n${practiceContextPrompt(practiceContext)}`,
+              "",
+              `Business prompt:\n${prompt}`,
+              "",
+              `Final deal before counter:\n${JSON.stringify(room.finalDeal)}`,
+              "",
+              `Founder counter-offer:\n${counter}`,
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+  });
+
+  const response = normalizeCounterResponse(
+    {
+      decision: extractLabeledValue(text, ["DECISION"]),
+      revisedAmount: extractLabeledValue(text, ["REVISED AMOUNT", "REVISED_AMOUNT"]),
+      revisedEquity: extractLabeledValue(text, ["REVISED EQUITY", "REVISED_EQUITY"]),
+      conditions: parseListValue(extractLabeledValue(text, ["CONDITIONS"])),
+      message: extractLabeledValue(text, ["MESSAGE"]),
+      finalAdvice: extractLabeledValue(text, ["FINAL ADVICE", "FINAL_ADVICE"]),
+    },
+    sharkKey,
+  );
+  if (isPlaceholderCounterResponse(response)) {
+    if (!strict) {
+      return createCounterOfferResponse({ sharkKey, prompt, practiceContext, room, counter, strict: true });
+    }
+    const repairedResponse = await repairCounterOfferResponse({
+      sharkKey,
+      prompt,
+      practiceContext,
+      room,
+      counter,
+      rawOutput: text,
+    });
+    if (isPlaceholderCounterResponse(repairedResponse)) {
+      throw new Error(`${sharkLabel(sharkKey)} returned placeholder counter-offer text.`);
+    }
+    return repairedResponse;
+  }
+
+  return response;
+}
+
+function buildRoomReportData(room) {
+  const finalDeal = room.finalDeal || {};
+  const totals = roomTotals(room);
+  return {
+    ...room,
+    kind: "user-shark-room",
+    winner: dealOutcomeKey(finalDeal.outcome),
+    verdict: finalDeal.verdict || "",
+    totals,
+    readinessScore: Math.round(
+      Object.values(totals).filter((value) => value != null).reduce((sum, value) => sum + value, 0) /
+        Math.max(1, Object.values(totals).filter((value) => value != null).length),
+    ),
+    strongestMoment: finalDeal.strongestAnswer || "",
+    weakestMoment: finalDeal.weakestAnswer || "",
+    nextPractice: finalDeal.nextPractice || [],
+    practiceDrills: normalizePracticeDrills(finalDeal.practiceDrills),
+  };
+}
+
+const pitchDuelStep = createStep({
+  id: "run-pitch-duel",
+  description: "Runs the Shark Tank duel against Nebius models and streams UI-ready events.",
+  inputSchema: z.object({
+    prompt: z.string().min(1),
+    practiceContext: z.object({
+      stage: z.string(),
+      stageLabel: z.string(),
+      stagePrompt: z.string(),
+      objective: z.string(),
+      objectiveLabel: z.string(),
+      objectivePrompt: z.string(),
+      length: z.string(),
+      lengthLabel: z.string(),
+      roundCount: z.number(),
+      questionsPerShark: z.number().optional(),
+    }),
+    cacheKey: z.string().min(1),
+  }),
+  outputSchema: z.any(),
+  execute: async ({ inputData, outputWriter }) =>
+    runPitchDuelSimulation({
+      prompt: inputData.prompt,
+      practiceContext: inputData.practiceContext,
+      cacheKey: inputData.cacheKey,
+      emit: async (event) => {
+        if (outputWriter) {
+          await outputWriter(event);
+        }
+      },
+    }),
+});
+
+const pitchDuelWorkflow = createWorkflow({
+  id: "pitch-duel-workflow",
+  inputSchema: z.object({
+    prompt: z.string().min(1),
+    practiceContext: z.object({
+      stage: z.string(),
+      stageLabel: z.string(),
+      stagePrompt: z.string(),
+      objective: z.string(),
+      objectiveLabel: z.string(),
+      objectivePrompt: z.string(),
+      length: z.string(),
+      lengthLabel: z.string(),
+      roundCount: z.number(),
+      questionsPerShark: z.number().optional(),
+    }),
+    cacheKey: z.string().min(1),
+  }),
+  outputSchema: z.any(),
+})
+  .then(pitchDuelStep)
+  .commit();
+
