@@ -4133,3 +4133,553 @@ const pitchDuelWorkflow = createWorkflow({
   .then(pitchDuelStep)
   .commit();
 
+const mastra = new Mastra({
+  agents: {
+    miniMaxFounderAgent,
+    deepSeekFounderAgent,
+    investorJudgeAgent,
+  },
+  workflows: { pitchDuelWorkflow },
+  storage: new LibSQLStore({
+    id: "ai-shark-tank-mastra-storage",
+    url: `file:${mastraDbPath}`,
+  }),
+});
+
+app.get("/api/health", (_request, response) => {
+  response.json({
+    ok: true,
+    hasNebiusKey: Boolean(process.env.NEBIUS_API_KEY),
+    callTimeoutMs: LLM_CALL_TIMEOUT_MS,
+    models: modelConfig,
+    agentFramework: {
+      name: "Mastra",
+      workflow: pitchDuelWorkflow.id,
+      roomMode: "user-shark-room",
+      agents: Object.values(mastra.listAgents()).map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+      })),
+    },
+  });
+});
+
+app.get("/api/reports", (request, response) => {
+  const reports = listReports(request.query.limit);
+  const drillAttempts = listDrillAttempts(request.query.limit);
+  response.json({
+    ok: true,
+    data: reports,
+    summary: summarizeReports(reports, drillAttempts),
+  });
+});
+
+app.get("/api/reports/:id", (request, response) => {
+  const report = getReport(String(request.params.id || ""));
+  if (!report) {
+    response.status(404).json({ ok: false, error: "Report not found." });
+    return;
+  }
+
+  response.json({ ok: true, data: report });
+});
+
+app.get("/reports/:id", (request, response) => {
+  const report = getReport(String(request.params.id || ""));
+  if (!report) {
+    response.status(404).send("<!doctype html><title>Report not found</title><h1>Report not found</h1>");
+    return;
+  }
+
+  response.type("html").send(renderReportHtml(report));
+});
+
+app.post("/api/prep", async (request, response) => {
+  const prompt = buildPromptFromBody(request.body);
+  if (!prompt) {
+    response.status(400).json({ ok: false, error: "Business prompt is required." });
+    return;
+  }
+
+  if (!process.env.NEBIUS_API_KEY) {
+    response.status(500).json({
+      ok: false,
+      error: "Missing NEBIUS_API_KEY. Add it to ai-shark-tank/.env and restart the server.",
+    });
+    return;
+  }
+
+  const practiceContext = normalizePracticeContext(request.body);
+
+  try {
+    const result = await withChunkCacheMeta({
+      prompt,
+      practiceContext,
+      step: "founder-prep",
+      extra: "prep-v1",
+      producer: () => createFounderPrep({ prompt, practiceContext }),
+    });
+    response.json({
+      ok: true,
+      cached: result.cached,
+      data: {
+        ...result.data,
+        cached: result.cached,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    response.status(502).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Nebius founder prep failed.",
+    });
+  }
+});
+
+app.post("/api/drill-feedback", async (request, response) => {
+  const reportId = sanitizeInput(request.body.reportId).slice(0, 80);
+  const report = reportId ? getReport(reportId) : null;
+  const prompt = buildPromptFromBody(request.body) || sanitizeInput(report?.prompt);
+  const answer = sanitizeInput(request.body.answer);
+  const drill = {
+    name: sanitizeInput(request.body.drill?.name, "Practice Drill").slice(0, 80),
+    goal: sanitizeInput(request.body.drill?.goal, "Improve one investor-critical answer.").slice(0, 180),
+    prompt: sanitizeInput(request.body.drill?.prompt, "Answer the investor question clearly.").slice(0, 320),
+  };
+
+  if (!prompt) {
+    response.status(400).json({ ok: false, error: "Business prompt is required." });
+    return;
+  }
+
+  if (!answer) {
+    response.status(400).json({ ok: false, error: "Write your practice answer first." });
+    return;
+  }
+
+  if (!process.env.NEBIUS_API_KEY) {
+    response.status(500).json({
+      ok: false,
+      error: "Missing NEBIUS_API_KEY. Add it to ai-shark-tank/.env and restart the server.",
+    });
+    return;
+  }
+
+  const practiceContext = report?.practiceContext || normalizePracticeContext(request.body);
+
+  try {
+    const result = await withChunkCacheMeta({
+      prompt,
+      practiceContext,
+      step: "drill-feedback",
+      extra: JSON.stringify({ reportId, drill, answer }),
+      producer: () => createDrillFeedback({ prompt, practiceContext, report, drill, answer }),
+    });
+    const attempt = saveDrillAttempt({
+      reportId,
+      drill,
+      answer,
+      feedback: result.data,
+    });
+    const attemptSummary = {
+      id: attempt.id,
+      reportId: reportId || null,
+      createdAt: attempt.createdAt,
+      drillName: drill.name,
+      drillPrompt: drill.prompt,
+      score: toScore(result.data.score),
+      verdict: sanitizeInput(result.data.verdict).slice(0, 180),
+      nextPracticeMove: sanitizeInput(result.data.nextPracticeMove).slice(0, 180),
+    };
+    response.json({
+      ok: true,
+      cached: result.cached,
+      data: {
+        ...result.data,
+        attemptId: attempt.id,
+        attemptCreatedAt: attempt.createdAt,
+        attempt: attemptSummary,
+        cached: result.cached,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    response.status(502).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Nebius drill feedback failed.",
+    });
+  }
+});
+
+app.post("/api/room/start", async (request, response) => {
+  const prompt = buildPromptFromBody(request.body);
+  if (!prompt) {
+    response.status(400).json({ ok: false, error: "Business prompt is required." });
+    return;
+  }
+
+  if (!process.env.NEBIUS_API_KEY) {
+    response.status(500).json({
+      ok: false,
+      error: "Missing NEBIUS_API_KEY. Add it to ai-shark-tank/.env and restart the server.",
+    });
+    return;
+  }
+
+  const practiceContext = normalizePracticeContext(request.body);
+
+  try {
+    const brief = await withChunkCache({
+      prompt,
+      practiceContext,
+      step: "user-room-brief",
+      extra: "panel-rounds",
+      producer: () => createSharkRoomBrief({ prompt, practiceContext }),
+    });
+    const id = randomUUID();
+    const room = saveRoom({
+      id,
+      kind: "user-shark-room",
+      status: "awaiting-answer",
+      prompt,
+      practiceContext,
+      models: modelConfig,
+      businessTitle: brief.businessTitle,
+      promptSummary: brief.promptSummary,
+      promptDiagnostics: brief.promptDiagnostics,
+      facts: brief.facts,
+      sharks: sharkProfiles(),
+      rounds: brief.rounds,
+      currentRoundIndex: 0,
+      finalDeal: null,
+    });
+
+    response.json({ ok: true, data: room });
+  } catch (error) {
+    console.error(error);
+    response.status(502).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Nebius room start failed.",
+    });
+  }
+});
+
+app.post("/api/room/:id/answer", async (request, response) => {
+  const room = getRoom(String(request.params.id || ""));
+  const answer = sanitizeInput(request.body.answer);
+  if (!room) {
+    response.status(404).json({ ok: false, error: "Room not found." });
+    return;
+  }
+  if (room.status === "complete") {
+    response.status(409).json({ ok: false, error: "This room is already complete. Start a new room or counter the final offers." });
+    return;
+  }
+  if (!answer) {
+    response.status(400).json({ ok: false, error: "Answer the sharks before advancing." });
+    return;
+  }
+  if (!process.env.NEBIUS_API_KEY) {
+    response.status(500).json({
+      ok: false,
+      error: "Missing NEBIUS_API_KEY. Add it to ai-shark-tank/.env and restart the server.",
+    });
+    return;
+  }
+
+  const index = Number(room.currentRoundIndex) || 0;
+  const round = room.rounds?.[index];
+  if (!round) {
+    response.status(400).json({ ok: false, error: "No active round found for this room." });
+    return;
+  }
+
+  try {
+    const reactions = await Promise.all(
+      sharkKeys.map((sharkKey) =>
+        withChunkCache({
+          prompt: room.prompt,
+          practiceContext: room.practiceContext,
+          step: `room-${room.id}-round-${index + 1}-${sharkKey}`,
+          extra: JSON.stringify({ question: round.panelQuestion, answer }),
+          producer: () =>
+            createSharkReaction({
+              sharkKey,
+              prompt: room.prompt,
+              practiceContext: room.practiceContext,
+              room,
+              round,
+              answer,
+            }),
+        }),
+      ),
+    );
+
+    const sharkReactions = Object.fromEntries(reactions.map((reaction) => [reaction.shark, reaction]));
+    const scores = Object.fromEntries(reactions.map((reaction) => [reaction.shark, reaction.score]));
+    const interest = Object.fromEntries(reactions.map((reaction) => [reaction.shark, reaction.interest]));
+    const nextRounds = [...room.rounds];
+    nextRounds[index] = {
+      ...round,
+      userAnswer: answer,
+      sharkReactions,
+      scores,
+      interest,
+      status: "scored",
+    };
+
+    let updatedRoom = {
+      ...room,
+      rounds: nextRounds,
+      currentRoundIndex: Math.min(index + 1, nextRounds.length - 1),
+      status: index + 1 >= nextRounds.length ? "dealing" : "awaiting-answer",
+    };
+
+    if (index + 1 >= nextRounds.length) {
+      const offers = await Promise.all(
+        sharkKeys.map((sharkKey) =>
+          withChunkCache({
+            prompt: room.prompt,
+            practiceContext: room.practiceContext,
+            step: `room-${room.id}-final-offer-${sharkKey}`,
+            extra: JSON.stringify(nextRounds.map((item) => ({ q: item.panelQuestion, a: item.userAnswer, s: item.scores }))),
+            producer: () =>
+              createFinalSharkOffer({
+                sharkKey,
+                prompt: room.prompt,
+                practiceContext: room.practiceContext,
+                room: { ...updatedRoom, rounds: nextRounds },
+              }),
+          }),
+        ),
+      );
+      const finalDeal = await withChunkCache({
+        prompt: room.prompt,
+        practiceContext: room.practiceContext,
+        step: `room-${room.id}-final-deal`,
+        extra: JSON.stringify(offers),
+        producer: () =>
+          createFinalDealReview({
+            prompt: room.prompt,
+            practiceContext: room.practiceContext,
+            room: { ...updatedRoom, rounds: nextRounds },
+            offers,
+          }),
+      });
+      updatedRoom = {
+        ...updatedRoom,
+        finalDeal,
+        status: "complete",
+        currentRoundIndex: nextRounds.length - 1,
+      };
+      if (isReportableDealOutcome(finalDeal.outcome)) {
+        const reportData = buildRoomReportData(updatedRoom);
+        const report = saveReport(reportData, null);
+        updatedRoom = {
+          ...updatedRoom,
+          winner: reportData.winner,
+          totals: reportData.totals,
+          readinessScore: reportData.readinessScore,
+          practiceDrills: reportData.practiceDrills,
+          reportId: report.id,
+          reportUrl: `/reports/${report.id}`,
+          generatedAt: report.createdAt,
+        };
+      }
+    }
+
+    updatedRoom = saveRoom(updatedRoom);
+    response.json({ ok: true, data: updatedRoom });
+  } catch (error) {
+    console.error(error);
+    response.status(502).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Nebius shark round failed.",
+    });
+  }
+});
+
+app.post("/api/room/:id/counter", async (request, response) => {
+  const room = getRoom(String(request.params.id || ""));
+  const counter = sanitizeInput(request.body.counter);
+  if (!room) {
+    response.status(404).json({ ok: false, error: "Room not found." });
+    return;
+  }
+  if (room.status !== "complete" || !room.finalDeal) {
+    response.status(409).json({ ok: false, error: "Counter-offers open after the sharks make final offers." });
+    return;
+  }
+  if (Array.isArray(room.finalDeal.counterOffers) && room.finalDeal.counterOffers.length) {
+    response.status(409).json({ ok: false, error: "Counter-offer already completed. Open the review to see the final report." });
+    return;
+  }
+  if (!counter) {
+    response.status(400).json({ ok: false, error: "Write your counter-offer first." });
+    return;
+  }
+  if (!process.env.NEBIUS_API_KEY) {
+    response.status(500).json({
+      ok: false,
+      error: "Missing NEBIUS_API_KEY. Add it to ai-shark-tank/.env and restart the server.",
+    });
+    return;
+  }
+
+  try {
+    const counterResponses = await Promise.all(
+      sharkKeys.map((sharkKey) =>
+        createCounterOfferResponse({
+          sharkKey,
+          prompt: room.prompt,
+          practiceContext: room.practiceContext,
+          room,
+          counter,
+        }),
+      ),
+    );
+    const finalDeal = {
+      ...room.finalDeal,
+      counterOffer: counter,
+      counterOffers: counterResponses,
+      outcome: counterResponses.some((item) => item.decision === "accept" || item.decision === "revise")
+        ? "Conditional deal"
+        : room.finalDeal.outcome,
+    };
+    const updatedRoom = saveRoom({ ...room, finalDeal });
+    if (updatedRoom.reportId) {
+      updateReportData(updatedRoom.reportId, buildRoomReportData(updatedRoom));
+    }
+    response.json({ ok: true, data: updatedRoom });
+  } catch (error) {
+    console.error(error);
+    response.status(502).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Nebius counter-offer failed.",
+    });
+  }
+});
+
+app.post("/api/simulate/stream", async (request, response) => {
+  const prompt = buildPromptFromBody(request.body);
+  if (!prompt) {
+    response.status(400).json({ ok: false, error: "Business prompt is required." });
+    return;
+  }
+  const practiceContext = normalizePracticeContext(request.body);
+
+  response.writeHead(200, {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+  });
+
+  const cacheKey = getCacheKey(prompt, practiceContext);
+  const cachedReport = getCachedReport(cacheKey);
+  if (cachedReport) {
+    sendStream(response, {
+      type: "done",
+      status: "Loaded saved report from SQLite.",
+      cached: true,
+      data: cachedReport,
+    });
+    response.end();
+    return;
+  }
+
+  if (!process.env.NEBIUS_API_KEY) {
+    sendStream(response, {
+      type: "error",
+      error: "Missing NEBIUS_API_KEY. Add it to ai-shark-tank/.env and restart the server.",
+    });
+    response.end();
+    return;
+  }
+
+  try {
+    const workflow = mastra.getWorkflow("pitchDuelWorkflow");
+    const run = await workflow.createRun();
+    const result = await run.start({
+      inputData: { prompt, practiceContext, cacheKey },
+      outputWriter: async (event) => {
+        sendStream(response, event);
+      },
+    });
+
+    if (result.status !== "success") {
+      throw new Error(result.error?.message || "Mastra pitch duel workflow failed.");
+    }
+
+    response.end();
+  } catch (error) {
+    console.error(error);
+    sendStream(response, {
+      type: "error",
+      error: error instanceof Error ? error.message : "Nebius duel simulation failed.",
+    });
+    response.end();
+  }
+});
+
+app.post("/api/simulate", async (request, response) => {
+  const prompt = buildPromptFromBody(request.body);
+  if (!prompt) {
+    response.status(400).json({ ok: false, error: "Business prompt is required." });
+    return;
+  }
+  const practiceContext = normalizePracticeContext(request.body);
+
+  const cacheKey = getCacheKey(prompt, practiceContext);
+  const cachedReport = getCachedReport(cacheKey);
+  if (cachedReport) {
+    response.json({ ok: true, cached: true, data: cachedReport });
+    return;
+  }
+
+  if (!process.env.NEBIUS_API_KEY) {
+    response.status(500).json({
+      ok: false,
+      error: "Missing NEBIUS_API_KEY. Add it to ai-shark-tank/.env and restart the server.",
+    });
+    return;
+  }
+
+  try {
+    const reportData = await runPitchDuelSimulation({
+      prompt,
+      practiceContext,
+      cacheKey,
+      emit: async () => {},
+    });
+    response.json({
+      ok: true,
+      cached: false,
+      data: reportData,
+    });
+  } catch (error) {
+    console.error(error);
+    response.status(502).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Nebius duel simulation failed.",
+    });
+  }
+});
+
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get("*", (request, response, next) => {
+    if (request.path.startsWith("/api")) {
+      next();
+      return;
+    }
+
+    response.sendFile(path.join(distPath, "index.html"));
+  });
+}
+
+app.listen(port, () => {
+  console.log(`AI Shark Tank listening on http://localhost:${port}`);
+  console.log(`${modelConfig.nemotron.label}: ${modelConfig.nemotron.model}`);
+  console.log(`${modelConfig.deepseek.label}: ${modelConfig.deepseek.model}`);
+  console.log(`${modelConfig.judge.label}: ${modelConfig.judge.model}`);
+});
