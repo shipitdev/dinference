@@ -91,3 +91,70 @@ Final deal:
 - `src/components/ReportModal.jsx`: in-app deal memo.
 - `src/components/ReportsLibrary.jsx`: saved report library.
 - `src/App.css`: visual design and desktop/laptop layout.
+
+## Environment
+
+Create `.env` in this folder:
+
+```bash
+NEBIUS_API_KEY=your_nebius_key
+NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1/
+NEBIUS_NEMOTRON_MODEL=MiniMaxAI/MiniMax-M3
+NEBIUS_NEMOTRON_BASE_URL=https://api.tokenfactory.nebius.com/v1/
+NEBIUS_DEEPSEEK_MODEL=deepseek-ai/DeepSeek-V4-Flash
+NEBIUS_DEEPSEEK_BASE_URL=https://api.tokenfactory.nebius.com/v1/
+NEBIUS_JUDGE_MODEL=nvidia/Nemotron-3_5-Lightning
+NEBIUS_JUDGE_BASE_URL=https://api.tokenfactory.nebius.com/v1/
+NEBIUS_CALL_TIMEOUT_MS=90000
+```
+
+Do not commit real API keys.
+
+## How To Run
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173/`.
+
+## API Endpoints
+
+- `GET /api/health`: backend health, model config, Mastra agent names.
+- `POST /api/room/start`: create an interactive shark room.
+- `POST /api/room/:id/answer`: submit the user's answer for the active round.
+- `POST /api/room/:id/counter`: send one founder counter-offer after final offers.
+- `POST /api/prep`: founder prep brief.
+- `POST /api/drill-feedback`: score a practice answer from a saved report drill.
+- `GET /api/reports`: saved reports and dashboard summary.
+- `GET /api/reports/:id`: saved report JSON.
+- `GET /reports/:id`: printable HTML deal memo.
+
+Legacy `/api/simulate` endpoints still exist for older saved-duel compatibility, but the UI uses the interactive room endpoints.
+
+## How To Test
+
+```bash
+npm run check
+node scripts/visual-3d-check.mjs
+node scripts/visual-interaction-check.mjs
+node scripts/visual-result-check.mjs
+```
+
+The visual scripts target desktop/laptop layouts and save screenshots in `/private/tmp`.
+
+## Manual Smoke Prompt
+
+```text
+I run a social media agency for local restaurants. We do content shoots, reels, ads, and influencer collabs. We made $18k revenue last month with 42% margin, have 11 recurring clients, and want $150k to hire editors and build an AI reporting dashboard.
+```
+
+Expected behavior:
+
+- The center panel asks round 1.
+- The bottom dock becomes "answer the sharks."
+- Each submitted answer produces three shark reactions, scores, and interest levels.
+- After all rounds, the deal memo shows offers/passes and a `Deal`, `Conditional deal`, or `No deal` outcome.
+- The counter-offer dock appears after final offers.
+- `Review` opens the in-app deal memo and `Reports` shows saved rooms.
