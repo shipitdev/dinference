@@ -90,3 +90,12 @@ It should open from a small top button and never cover the core studio experienc
 4. Upgrade the report modal with readiness score and rewritten pitch.
 5. Add a clean saved-reports dashboard modal.
 6. Add a critic retry pass only when answers are vague or miss user facts.
+
+## Report Roadmap
+
+The next report pass should make the deal memo useful after the room closes:
+
+1. Readiness score with the three weakest skills called out.
+2. Rewritten 60-second pitch built from the founder's own numbers.
+3. Objection drills scored per attempt, with a trend line in the library.
+4. Recommended ask and milestone framing for the next real investor meeting.
