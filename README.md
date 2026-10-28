@@ -65,3 +65,26 @@ The API server runs on port `8790` by default (see `.env`).
 - `GET /api/reports/:id` — saved report JSON
 
 See [agent.md](./agent.md) for full architecture, data models, and testing notes.
+
+## Usage
+
+1. Enter a natural-language business pitch in the bottom dock.
+2. Answer each shark's questions round by round.
+3. Review shark reactions, scores, and interest levels after each answer.
+4. After the final round, read offers/passes and the deal memo.
+5. Optionally send one counter-offer before closing the session.
+
+Example pitch:
+
+```text
+I run a social media agency for local restaurants. We do content shoots, reels, ads, and influencer collabs. We made $18k revenue last month with 42% margin, have 11 recurring clients, and want $150k to hire editors and build an AI reporting dashboard.
+```
+
+## Test
+
+```bash
+npm run check
+node scripts/visual-3d-check.mjs
+node scripts/visual-interaction-check.mjs
+node scripts/visual-result-check.mjs
+```
