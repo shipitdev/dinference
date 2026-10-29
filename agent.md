@@ -1,6 +1,6 @@
-# AI Shark Tank
+# Dinference
 
-AI Shark Tank is a desktop/laptop pitch practice room. The user is the founder. Three Nebius-backed model agents act as sharks, ask investor questions, score the user's answers, negotiate, and save a final deal memo in SQLite.
+Dinference is a desktop/laptop pitch practice room. The user is the founder. Three Nebius-backed model agents act as sharks, ask investor questions, score the user's answers, negotiate, and save a final deal memo in SQLite.
 
 The app follows the Shark Tank format: there is no separate neutral judge. The center/lead seat is the third investor shark, and all three sharks evaluate the founder independently.
 
