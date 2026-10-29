@@ -966,7 +966,7 @@ function saveReport(data, cacheKey) {
       id,
       cacheKey || null,
       createdAt,
-      data.businessTitle || "AI Shark Tank Report",
+      data.businessTitle || "Dinference Report",
       data.winner || "tie",
       data.prompt || "",
       JSON.stringify({ ...data, reportId: id, reportUrl: `/reports/${id}`, generatedAt: data.generatedAt || createdAt }),
@@ -990,7 +990,7 @@ function updateReportData(id, data) {
   if (!existing) return null;
   db.prepare("UPDATE reports SET winner = ?, title = ?, prompt = ?, data = ? WHERE id = ?").run(
     data.winner || "tie",
-    data.businessTitle || "AI Shark Tank Report",
+    data.businessTitle || "Dinference Report",
     data.prompt || "",
     JSON.stringify({ ...data, reportId: id, reportUrl: `/reports/${id}` }),
     id,
@@ -1503,7 +1503,7 @@ function renderSharkRoomReportHtml(report) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(report.businessTitle)} · AI Shark Tank Deal Memo</title>
+    <title>${escapeHtml(report.businessTitle)} · Dinference Deal Memo</title>
     <style>
       :root { color: #111; background: #f7f7f4; font-family: Helvetica, "Helvetica Neue", Arial, sans-serif; }
       body { margin: 0; }
@@ -1531,7 +1531,7 @@ function renderSharkRoomReportHtml(report) {
   <body>
     <main>
       <header>
-        <div class="kicker">AI Shark Tank Deal Memo</div>
+        <div class="kicker">Dinference Deal Memo</div>
         <h1>${escapeHtml(report.businessTitle)}</h1>
         <p>${escapeHtml(report.promptSummary)}</p>
         <p class="muted">Generated ${escapeHtml(new Date(report.generatedAt).toLocaleString())}</p>
@@ -1635,7 +1635,7 @@ function renderReportHtml(report) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(report.businessTitle)} · AI Shark Tank Report</title>
+    <title>${escapeHtml(report.businessTitle)} · Dinference Report</title>
     <style>
       :root { color: #111; background: #f7f7f4; font-family: Helvetica, "Helvetica Neue", Arial, sans-serif; }
       body { margin: 0; }
@@ -1671,7 +1671,7 @@ function renderReportHtml(report) {
   <body>
     <main>
       <header>
-        <div class="kicker">AI Shark Tank Final Report</div>
+        <div class="kicker">Dinference Final Report</div>
         <h1>${escapeHtml(report.businessTitle)}</h1>
         <p>${escapeHtml(report.promptSummary)}</p>
         <p class="muted">Generated ${escapeHtml(new Date(report.generatedAt).toLocaleString())}</p>
@@ -4079,7 +4079,7 @@ function buildRoomReportData(room) {
 
 const pitchDuelStep = createStep({
   id: "run-pitch-duel",
-  description: "Runs the Shark Tank duel against Nebius models and streams UI-ready events.",
+  description: "Runs the investor duel against Nebius models and streams UI-ready events.",
   inputSchema: z.object({
     prompt: z.string().min(1),
     practiceContext: z.object({
@@ -4678,7 +4678,7 @@ if (fs.existsSync(distPath)) {
 }
 
 app.listen(port, () => {
-  console.log(`AI Shark Tank listening on http://localhost:${port}`);
+  console.log(`Dinference listening on http://localhost:${port}`);
   console.log(`${modelConfig.nemotron.label}: ${modelConfig.nemotron.model}`);
   console.log(`${modelConfig.deepseek.label}: ${modelConfig.deepseek.model}`);
   console.log(`${modelConfig.judge.label}: ${modelConfig.judge.model}`);

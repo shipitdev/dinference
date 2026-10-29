@@ -34,7 +34,7 @@ export function useSimulation() {
   const stageTitle = useMemo(() => {
     if (isLoading) return "Preparing shark room";
     if (simulation) return simulation.businessTitle;
-    return "AI Shark Tank";
+    return "Dinference";
   }, [isLoading, simulation]);
 
   async function runSimulation(event) {
