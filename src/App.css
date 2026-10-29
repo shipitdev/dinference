@@ -2008,3 +2008,88 @@ button:disabled {
   text-align: center;
 }
 
+@media (max-width: 980px) {
+  .dock-top {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .dock-config-panel {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dock-config-panel .segmented-row:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .dock-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .dock-hints {
+    width: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .dock-config-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .segmented-row > div {
+    flex-wrap: wrap;
+  }
+
+  .speech-card:not(.judge-console) {
+    width: min(280px, 70vw);
+  }
+}
+
+@media (max-width: 620px) {
+  .duel-room {
+    padding: 14px 12px 28px;
+  }
+
+  .question-hud {
+    position: static;
+    left: auto;
+    bottom: auto;
+    width: 100%;
+    margin: 12px auto 0;
+    transform: none;
+  }
+
+  .prompt-dock {
+    position: static;
+    left: auto;
+    bottom: auto;
+    width: 100%;
+    margin-top: 18px;
+    transform: none;
+  }
+
+  .round-strip {
+    position: static;
+    transform: none;
+    margin: 12px auto 0;
+  }
+
+  .modal-summary,
+  .prep-summary,
+  .review-grid,
+  .brief-grid,
+  .skill-map,
+  .dashboard-head,
+  .dashboard-skills,
+  .dashboard-meta,
+  .human-progress,
+  .library-stats,
+  .session-card,
+  .round-report,
+  .practice-columns,
+  .offer-grid {
+    grid-template-columns: 1fr;
+  }
+}
